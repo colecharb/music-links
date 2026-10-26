@@ -1,0 +1,8 @@
+# Copy to .dev.vars for local development. All three are optional: without them (or if they are
+# invalid) Apple matching falls back to the public iTunes Search API, which can't look up by ISRC.
+#
+# Apple Developer -> Certificates, IDs & Profiles -> Keys -> "+" -> enable MusicKit -> download the .p8.
+APPLE_TEAM_ID=ABCDE12345
+APPLE_KEY_ID=XYZ987WVUT
+# The .p8 file contents. Literal \n sequences are accepted, so it can be kept on one line.
+APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----"
