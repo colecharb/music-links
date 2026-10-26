@@ -3,7 +3,8 @@
 //
 // Ladder per API-backed target (Deezer, Apple):
 //   1. identifier (ISRC for tracks, UPC for albums) -> 'exact', re-verified against source metadata
-//   2. metadata search -> 'fuzzy' only above the confidence threshold
+//   2. metadata search -> 'fuzzy' only above the confidence threshold (started alongside step 1, and
+//      also reached when the identifier lookup fails)
 //   3. search URL -> 'search'
 // When the source has no identifier (Spotify, YouTube, iTunes-mode Apple), the best Deezer match
 // supplies one; identifier lookups based on it are verified with the full (strict) rules.
@@ -11,7 +12,7 @@
 import type { UpstreamCtx } from './http';
 import { UpstreamError } from './http';
 import { parseAlbumTitle, parseTitle } from './normalize';
-import { pickBestAlbum, pickBestById, pickBestTrack } from './match';
+import { pickBestAlbum, pickBestById, pickBestTrack, type PickResult } from './match';
 import { cacheKey } from './parse';
 import { appleAlbumsByUpc, appleTracksByIsrc, getAppleItem, searchApple } from './sources/apple';
 import { amazonSearchUrl } from './sources/amazon';
@@ -156,40 +157,49 @@ export async function resolveRef(ctx: UpstreamCtx, ref: SourceRef, now: () => nu
 // Deezer
 
 async function matchDeezerTrack(ctx: UpstreamCtx, source: TrackMeta): Promise<{ detail: ServiceDetail }> {
-  if (source.isrc) {
-    const hit = await deezerTrackByIsrc(ctx, source.isrc);
-    if (hit) {
-      const pick = pickBestById(source, [hit], { strict: false });
-      if (pick.accepted) return { detail: matched('exact', 'isrc', pick.accepted.item, pick.accepted.score) };
+  // Start the search right away; it runs during the ISRC lookup and is used only if that finds nothing.
+  const searchP = settle(searchDeezer(ctx, buildQuery(source)));
+  const isrc = source.isrc;
+  const byIsrc = isrc
+    ? async () => {
+        const hit = await deezerTrackByIsrc(ctx, isrc);
+        return hit ? exactMatch('isrc', isrc, pickBestById(source, [hit], { strict: false })) : null;
+      }
+    : undefined;
+  const detail = await ladder('isrc', byIsrc, async () => {
+    const results = (await unwrap(searchP)).filter(isTrack);
+    const pick = pickBestTrack(source, results);
+    if (!pick.accepted) return noMatch('deezer', source, pick.ranked);
+    // Apple's identifier lookup needs the ISRC; fetch the full track only when the search hit lacks it.
+    let item = pick.accepted.item;
+    if (!item.isrc) {
+      const full = await getDeezerItem(ctx, 'track', item.id).catch(() => null);
+      if (full && full.kind === 'track') item = full;
     }
-  }
-  const results = (await searchDeezer(ctx, buildQuery(source))).filter(isTrack);
-  const pick = pickBestTrack(source, results);
-  if (!pick.accepted) return { detail: noMatch('deezer', source, pick.ranked) };
-  // Apple's identifier lookup needs the ISRC; fetch the full track only when the search hit lacks it.
-  let item = pick.accepted.item;
-  if (!item.isrc) {
-    const full = await getDeezerItem(ctx, 'track', item.id).catch(() => null);
-    if (full && full.kind === 'track') item = full;
-  }
-  return { detail: matched('fuzzy', 'search', item, pick.accepted.score) };
+    return matched('fuzzy', 'search', item, pick.accepted.score);
+  });
+  return { detail };
 }
 
 async function matchDeezerAlbum(ctx: UpstreamCtx, source: AlbumMeta): Promise<{ detail: ServiceDetail }> {
-  if (source.upc) {
-    const hit = await deezerAlbumByUpc(ctx, source.upc);
-    if (hit) {
-      const pick = pickBestById(source, [hit], { strict: false });
-      if (pick.accepted) return { detail: matched('exact', 'upc', pick.accepted.item, pick.accepted.score) };
-    }
-  }
-  const results = (await searchDeezer(ctx, buildQuery(source))).filter(isAlbum);
-  const pick = pickBestAlbum(source, results);
-  if (!pick.accepted) return { detail: noMatch('deezer', source, pick.ranked) };
-  // Search results lack the UPC (needed for Apple); fetch the full album.
-  const full = await getDeezerItem(ctx, 'album', pick.accepted.item.id).catch(() => null);
-  const item = full && full.kind === 'album' ? full : pick.accepted.item;
-  return { detail: matched('fuzzy', 'search', item, pick.accepted.score) };
+  const searchP = settle(searchDeezer(ctx, buildQuery(source)));
+  const upc = source.upc;
+  const byUpc = upc
+    ? async () => {
+        const hit = await deezerAlbumByUpc(ctx, upc);
+        return hit ? exactMatch('upc', upc, pickBestById(source, [hit], { strict: false })) : null;
+      }
+    : undefined;
+  const detail = await ladder('upc', byUpc, async () => {
+    const results = (await unwrap(searchP)).filter(isAlbum);
+    const pick = pickBestAlbum(source, results);
+    if (!pick.accepted) return noMatch('deezer', source, pick.ranked);
+    // Search results lack the UPC (needed for Apple); fetch the full album.
+    const full = await getDeezerItem(ctx, 'album', pick.accepted.item.id).catch(() => null);
+    const item = full && full.kind === 'album' ? full : pick.accepted.item;
+    return matched('fuzzy', 'search', item, pick.accepted.score);
+  });
+  return { detail };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -202,34 +212,21 @@ async function matchAppleTrack(
 ): Promise<ServiceDetail> {
   // Start the text search right away; it's the fallback for every identifier path.
   const searchP = settle(searchApple(ctx, buildQuery(source)));
-
-  const byIsrc = async (isrc: string, strict: boolean) => {
-    const hits = await appleTracksByIsrc(ctx, isrc);
-    const pick = pickBestById(source, hits, { strict });
-    return pick.accepted ? { ...matched('exact', 'isrc', pick.accepted.item, pick.accepted.score), identifier: isrc } : null;
-  };
-
-  if (source.isrc) {
-    const hit = await byIsrc(source.isrc, false);
-    if (hit) return hit;
-  } else {
-    const isrc = await derivedIsrc;
-    if (isrc) {
-      const hit = await byIsrc(isrc, true).catch(() => null);
-      if (hit) return hit;
-    }
-  }
-
-  const query = buildQuery(source);
-  const results = await searchWithRetry(
-    unwrap(searchP),
-    () => searchApple(ctx, altQuery(query)),
-    isTrack,
-    (c) => pickBestTrack(source, c),
-  );
-  const pick = pickBestTrack(source, results);
-  if (!pick.accepted) return noMatch('apple', source, pick.ranked);
-  return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
+  const isrc = source.isrc ?? (await derivedIsrc);
+  const byIsrc = isrc
+    ? async () => exactMatch('isrc', isrc, pickBestById(source, await appleTracksByIsrc(ctx, isrc), { strict: !source.isrc }))
+    : undefined;
+  return ladder('isrc', byIsrc, async () => {
+    const results = await searchWithRetry(
+      unwrap(searchP),
+      () => searchApple(ctx, altQuery(buildQuery(source))),
+      isTrack,
+      (c) => pickBestTrack(source, c),
+    );
+    const pick = pickBestTrack(source, results);
+    if (!pick.accepted) return noMatch('apple', source, pick.ranked);
+    return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
+  });
 }
 
 async function matchAppleAlbum(
@@ -238,34 +235,60 @@ async function matchAppleAlbum(
   derivedUpc: Promise<string | undefined>,
 ): Promise<ServiceDetail> {
   const searchP = settle(searchApple(ctx, buildQuery(source)));
+  const upc = source.upc ?? (await derivedUpc);
+  const byUpc = upc
+    ? async () => exactMatch('upc', upc, pickBestById(source, await appleAlbumsByUpc(ctx, upc), { strict: !source.upc }))
+    : undefined;
+  return ladder('upc', byUpc, async () => {
+    const results = await searchWithRetry(
+      unwrap(searchP),
+      () => searchApple(ctx, altQuery(buildQuery(source))),
+      isAlbum,
+      (c) => pickBestAlbum(source, c),
+    );
+    const pick = pickBestAlbum(source, results);
+    if (!pick.accepted) return noMatch('apple', source, pick.ranked);
+    return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
+  });
+}
 
-  const byUpc = async (upc: string, strict: boolean) => {
-    const hits = await appleAlbumsByUpc(ctx, upc);
-    const pick = pickBestById(source, hits, { strict });
-    return pick.accepted ? { ...matched('exact', 'upc', pick.accepted.item, pick.accepted.score), identifier: upc } : null;
-  };
+// ---------------------------------------------------------------------------------------------
+// Ladder
 
-  if (source.upc) {
-    const hit = await byUpc(source.upc, false);
-    if (hit) return hit;
-  } else {
-    const upc = await derivedUpc;
-    if (upc) {
-      const hit = await byUpc(upc, true).catch(() => null);
+/**
+ * Identifier step, then the metadata search. A failed lookup (timeout, 5xx, quota) counts as no hit:
+ * the search still decides, and the lookup's error is kept in the note for the misses log. Only a
+ * failing search makes the whole service an 'error'.
+ */
+async function ladder(
+  via: 'isrc' | 'upc',
+  lookup: (() => Promise<ServiceDetail | null>) | undefined,
+  search: () => Promise<ServiceDetail>,
+): Promise<ServiceDetail> {
+  let lookupNote: string | undefined;
+  if (lookup) {
+    try {
+      const hit = await lookup();
       if (hit) return hit;
+    } catch (err) {
+      lookupNote = `${via} lookup failed: ${errorText(err)}`;
     }
   }
+  try {
+    return withNote(await search(), lookupNote);
+  } catch (err) {
+    if (lookupNote && err instanceof UpstreamError) throw new UpstreamError(`${lookupNote}; ${err.message}`, err.status);
+    throw err;
+  }
+}
 
-  const query = buildQuery(source);
-  const results = await searchWithRetry(
-    unwrap(searchP),
-    () => searchApple(ctx, altQuery(query)),
-    isAlbum,
-    (c) => pickBestAlbum(source, c),
-  );
-  const pick = pickBestAlbum(source, results);
-  if (!pick.accepted) return noMatch('apple', source, pick.ranked);
-  return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
+function exactMatch(via: 'isrc' | 'upc', identifier: string, pick: PickResult<ItemMeta>): ServiceDetail | null {
+  return pick.accepted ? { ...matched('exact', via, pick.accepted.item, pick.accepted.score), identifier } : null;
+}
+
+function withNote(detail: ServiceDetail, note: string | undefined): ServiceDetail {
+  if (!note) return detail;
+  return { ...detail, note: detail.note ? `${note}; ${detail.note}` : note };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -350,9 +373,12 @@ async function isolate<T extends { detail: ServiceDetail }>(
   try {
     return await fn();
   } catch (err) {
-    const note = err instanceof UpstreamError ? err.message : `unexpected: ${String(err)}`;
-    return { detail: { ...searchDetail(service, query), outcome: 'error', note } };
+    return { detail: { ...searchDetail(service, query), outcome: 'error', note: errorText(err) } };
   }
+}
+
+function errorText(err: unknown): string {
+  return err instanceof UpstreamError ? err.message : `unexpected: ${String(err)}`;
 }
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };

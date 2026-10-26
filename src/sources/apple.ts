@@ -76,14 +76,18 @@ export async function getAppleItem(ctx: UpstreamCtx, kind: Kind, id: string): Pr
   );
 }
 
-/** Every Apple song with this ISRC (album version, compilations, single...). [] in iTunes mode, which can't filter by ISRC. */
+// Identifier lookups and searches return match candidates, so they leave out what Apple Music can't play
+// in the storefront asked: a direct link to it would not play. getAppleItem keeps everything: a source
+// item is what the visitor shared.
+
+/** Every playable Apple song with this ISRC (album version, compilations, single...). [] in iTunes mode, which can't filter by ISRC. */
 export async function appleTracksByIsrc(ctx: UpstreamCtx, isrc: string): Promise<TrackMeta[]> {
   return withAppleMode(
     ctx,
     (token) =>
       inStorefront(ctx, async (sf) => {
         const body = await musicKit(ctx, token, `${sf}/songs?filter[isrc]=${encodeURIComponent(isrc)}&include=${MUSICKIT_INCLUDE.track}`);
-        return musicKitItems('track', body);
+        return musicKitItems('track', body, musicKitPlayable);
       }),
     async () => [],
   );
@@ -95,12 +99,12 @@ export async function appleAlbumsByUpc(ctx: UpstreamCtx, upc: string): Promise<A
     (token) =>
       inStorefront(ctx, async (sf) => {
         const body = await musicKit(ctx, token, `${sf}/albums?filter[upc]=${encodeURIComponent(upc)}&include=${MUSICKIT_INCLUDE.album}`);
-        return musicKitItems('album', body);
+        return musicKitItems('album', body, musicKitPlayable);
       }),
     () =>
       inStorefront(ctx, async (sf) => {
         const body = await itunes(ctx, `lookup?upc=${encodeURIComponent(upc)}&country=${sf}`);
-        return itunesItems('album', body);
+        return itunesItems('album', body, itunesStreamable);
       }),
   );
 }
@@ -115,13 +119,13 @@ export async function searchApple(ctx: UpstreamCtx, q: SearchQuery, limit = DEFA
         const n = clamp(limit, 1, MUSICKIT_MAX_SEARCH_LIMIT);
         const type = MUSICKIT_TYPE[q.kind];
         const body = await musicKit(ctx, token, `${sf}/search?term=${term}&types=${type}&limit=${n}`);
-        return musicKitItems(q.kind, at(body, 'results', type));
+        return musicKitItems(q.kind, at(body, 'results', type), musicKitPlayable);
       }),
     () =>
       inStorefront(ctx, async (sf) => {
         const n = clamp(limit, 1, ITUNES_MAX_LIMIT);
         const body = await itunes(ctx, `search?term=${term}&country=${sf}&media=music&entity=${ITUNES_ENTITY[q.kind]}&limit=${n}`);
-        return itunesItems(q.kind, body);
+        return itunesItems(q.kind, body, itunesStreamable);
       }),
   );
 }
@@ -267,14 +271,20 @@ function epochSeconds(): number {
 // ---------------------------------------------------------------------------------------------
 // MusicKit mapping ({ data: [ { id, type, href, attributes, relationships } ] })
 
-function musicKitItems(kind: 'track', container: unknown): TrackMeta[];
-function musicKitItems(kind: 'album', container: unknown): AlbumMeta[];
-function musicKitItems(kind: Kind, container: unknown): ItemMeta[];
-function musicKitItems(kind: Kind, container: unknown): ItemMeta[] {
+function musicKitItems(kind: 'track', container: unknown, keep?: Keep): TrackMeta[];
+function musicKitItems(kind: 'album', container: unknown, keep?: Keep): AlbumMeta[];
+function musicKitItems(kind: Kind, container: unknown, keep?: Keep): ItemMeta[];
+function musicKitItems(kind: Kind, container: unknown, keep: Keep = keepAll): ItemMeta[] {
   const toItem: (r: unknown) => ItemMeta | undefined = kind === 'track' ? musicKitTrack : musicKitAlbum;
   return list(at(container, 'data'))
+    .filter(keep)
     .map(toItem)
     .filter((i): i is ItemMeta => i !== undefined);
+}
+
+/** MusicKit omits playParams on songs and albums that can't be played with an Apple Music subscription. */
+function musicKitPlayable(r: unknown): boolean {
+  return at(r, 'attributes', 'playParams') !== undefined;
 }
 
 function musicKitTrack(r: unknown): TrackMeta | undefined {
@@ -364,14 +374,23 @@ function musicKitArt(artwork: unknown): string | undefined {
 // ---------------------------------------------------------------------------------------------
 // iTunes mapping ({ resultCount, results: [ { wrapperType, kind, ... } ] })
 
-function itunesItems(kind: 'track', body: unknown): TrackMeta[];
-function itunesItems(kind: 'album', body: unknown): AlbumMeta[];
-function itunesItems(kind: Kind, body: unknown): ItemMeta[];
-function itunesItems(kind: Kind, body: unknown): ItemMeta[] {
+function itunesItems(kind: 'track', body: unknown, keep?: Keep): TrackMeta[];
+function itunesItems(kind: 'album', body: unknown, keep?: Keep): AlbumMeta[];
+function itunesItems(kind: Kind, body: unknown, keep?: Keep): ItemMeta[];
+function itunesItems(kind: Kind, body: unknown, keep: Keep = keepAll): ItemMeta[] {
   const toItem: (r: unknown) => ItemMeta | undefined = kind === 'track' ? itunesTrack : itunesAlbum;
   return list(at(body, 'results'))
+    .filter(keep)
     .map(toItem)
     .filter((i): i is ItemMeta => i !== undefined);
+}
+
+/**
+ * iTunes marks songs Apple Music can't stream with isStreamable false (e.g. album-only soundtrack
+ * tracks). Collections carry no such flag and are kept.
+ */
+function itunesStreamable(r: unknown): boolean {
+  return at(r, 'isStreamable') !== false;
 }
 
 function itunesTrack(r: unknown): TrackMeta | undefined {
@@ -494,6 +513,11 @@ function clamp(n: number, min: number, max: number): number {
 
 // ---------------------------------------------------------------------------------------------
 // Untyped JSON access
+
+/** Filter on raw API results, applied before mapping. */
+type Keep = (raw: unknown) => boolean;
+
+const keepAll: Keep = () => true;
 
 function at(v: unknown, ...keys: string[]): unknown {
   for (const k of keys) {

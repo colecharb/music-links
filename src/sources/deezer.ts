@@ -62,7 +62,7 @@ export async function deezerTrackByIsrc(ctx: UpstreamCtx, isrc: string): Promise
   const code = normalizeIsrc(isrc);
   if (!code) return null;
   const body = await getDeezer(ctx, `${DEEZER_API}/track/isrc:${code}`);
-  const track = body ? mapDeezerTrack(body) : null;
+  const track = body && !isWithdrawn(body) ? mapDeezerTrack(body) : null;
   // The lookup is meant to be exact; never pass off a different recording as an identifier match.
   if (track?.isrc && track.isrc.toUpperCase() !== code) return null;
   return track;
@@ -86,6 +86,16 @@ export async function deezerAlbumByUpc(ctx: UpstreamCtx, upc: string): Promise<A
   // A miss is only a miss when every lookup answered.
   if (failure !== undefined) throw failure;
   return null;
+}
+
+/**
+ * A track taken down everywhere: available_countries is empty (not merely absent). Deezer still serves
+ * such duplicates by ISRC (readable false, web page 404) next to the playable copy with the same ISRC.
+ * readable alone isn't the signal: it reflects the requesting (worker's) country, not the visitor's.
+ */
+export function isWithdrawn(raw: unknown): boolean {
+  const countries = asObject(raw)?.available_countries;
+  return Array.isArray(countries) && countries.length === 0;
 }
 
 /** Uppercase, without separators; null when it isn't a well-formed ISRC. */
@@ -154,6 +164,7 @@ async function searchOnce(ctx: UpstreamCtx, kind: Kind, query: string, limit: nu
   const data = body && Array.isArray(body.data) ? body.data : [];
   const items: ItemMeta[] = [];
   for (const raw of data) {
+    if (isWithdrawn(raw)) continue;
     const item = kind === 'track' ? mapDeezerTrack(raw) : mapDeezerAlbum(raw);
     if (item) items.push(item);
   }

@@ -8,6 +8,7 @@ import {
   deezerUrl,
   getDeezerItem,
   isoDate,
+  isWithdrawn,
   mapDeezerAlbum,
   mapDeezerTrack,
   mergeById,
@@ -300,6 +301,29 @@ describe('deezerTrackByIsrc', () => {
     expect(await deezerTrackByIsrc(ctx, 'FRZ019601820')).toBeNull();
   });
 
+  // Deezer answers these ISRCs with a duplicate taken down everywhere (readable false,
+  // available_countries [], web page 404) while the playable copy (The Game 4092324041, A Night At
+  // The Opera 4091937401) carries the same ISRC.
+  it.each([
+    ['GBUM71029605', '3476766481'],
+    ['GBUM71029604', '3541552051'],
+  ])('a withdrawn duplicate is a miss: %s -> %s (recorded)', async (isrc, deadId) => {
+    expect(recorded(`${API}/track/isrc:${isrc}`)).toMatchObject({ id: Number(deadId), readable: false, available_countries: [] });
+    expect(await deezerTrackByIsrc(fixtureCtx(), isrc)).toBeNull();
+  });
+
+  it('readable false alone is still a hit: it reflects the country the request comes from', async () => {
+    const body = { ...recorded(`${API}/track/isrc:FRZ019601820`), readable: false };
+    const ctx = fixtureCtx({ extra: [fixture(`${API}/track/isrc:FRZ019601820`, body)] });
+    expect(await deezerTrackByIsrc(ctx, 'FRZ019601820')).toStrictEqual(OUELLI_SAHRA);
+  });
+
+  it('a body without available_countries is still a hit', async () => {
+    const { available_countries: _countries, ...body } = recorded(`${API}/track/isrc:FRZ019601820`);
+    const ctx = fixtureCtx({ extra: [fixture(`${API}/track/isrc:FRZ019601820`, body)] });
+    expect(await deezerTrackByIsrc(ctx, 'FRZ019601820')).toStrictEqual(OUELLI_SAHRA);
+  });
+
   it('quota error -> 429', async () => {
     const ctx = fixtureCtx({ extra: [fixture(`${API}/track/isrc:FRZ019601820`, QUOTA_ERROR)] });
     expect((await rejection(deezerTrackByIsrc(ctx, 'FRZ019601820'))).status).toBe(429);
@@ -457,6 +481,21 @@ describe('searchDeezer', () => {
       extra: [fixture(KHALED_TITLE, { total: 0 }), fixture(KHALED_PLAIN, { data: [null, { id: 5 }, { title: 'x' }, plain.data[0]] })],
     });
     expect((await searchDeezer(ctx, KHALED_QUERY)).map((i) => i.id)).toEqual(['515038112']);
+  });
+
+  it('skips hits withdrawn everywhere but keeps unreadable ones', async () => {
+    // Recorded search payloads carry no available_countries (withdrawn duplicates don't show up in
+    // them); should the field appear, an empty list rules the hit out like it does for ISRC lookups.
+    const plain = recorded(KHALED_PLAIN) as { data: Record<string, unknown>[] };
+    expect(plain.data.every((d) => !('available_countries' in d))).toBe(true);
+    const [first, second] = plain.data;
+    const ctx = fixtureCtx({
+      extra: [
+        fixture(KHALED_TITLE, { data: [], total: 0 }),
+        fixture(KHALED_PLAIN, { data: [{ ...first, available_countries: [] }, { ...second, readable: false }], total: 2 }),
+      ],
+    });
+    expect((await searchDeezer(ctx, KHALED_QUERY)).map((i) => i.id)).toEqual([String(second?.id)]);
   });
 
   it('empty query -> no requests', async () => {
@@ -625,6 +664,17 @@ describe('identifier helpers', () => {
     ['12345678', ['12345678']],
   ])('upcVariants(%j) -> %j', (upc, expected) => {
     expect(upcVariants(upc)).toEqual(expected);
+  });
+
+  it.each([
+    [{ id: 1, available_countries: [] }, true],
+    [{ id: 1, available_countries: ['FR', 'US'] }, false],
+    [{ id: 1, readable: false }, false],
+    [{ id: 1, available_countries: 'none' }, false],
+    [null, false],
+    [[], false],
+  ])('isWithdrawn(%j) -> %j', (raw, expected) => {
+    expect(isWithdrawn(raw)).toBe(expected);
   });
 
   it('mergeById keeps the first occurrence in list order', () => {

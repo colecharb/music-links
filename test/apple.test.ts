@@ -441,6 +441,16 @@ describe('iTunes mode: getAppleItem', () => {
   });
 });
 
+describe('iTunes mode: a shared song Apple Music cannot stream', () => {
+  it('still resolves as the source (recorded)', async () => {
+    expect(await getAppleItem(fixtureCtx(), 'track', '1771867453')).toMatchObject({
+      id: '1771867453',
+      title: 'Get Lucky',
+      album: 'Piece By Piece (Music from the Motion Picture)',
+    });
+  });
+});
+
 describe('iTunes mode: identifiers', () => {
   it('looks albums up by UPC', async () => {
     const calls: string[] = [];
@@ -556,6 +566,17 @@ describe('iTunes mode: searchApple', () => {
     const calls: string[] = [];
     expect(await searchApple(fixtureCtx({ calls }), { kind: 'track', title: ' ', artist: '' })).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  it('leaves out songs Apple Music cannot stream (recorded)', async () => {
+    // The "Get Lucky" on the Piece By Piece soundtrack (1771867453) is an album-only purchase:
+    // isStreamable false, while the same recording on Random Access Memories streams.
+    const url = songSearchUrl('nile+rodgers+get+lucky');
+    const raw = (JSON.parse(recordedBody(url)) as { results: { trackId: number; isStreamable: boolean }[] }).results;
+    expect(raw.filter((r) => !r.isStreamable).map((r) => r.trackId)).toEqual([1771867453]);
+    const hits = await searchApple(fixtureCtx(), { kind: 'track', title: 'get lucky', artist: 'nile rodgers' });
+    expect(hits.map((h) => h.id)).toEqual(raw.filter((r) => r.isStreamable).map((r) => String(r.trackId)));
+    expect(hits.map((h) => h.id)).toContain('617154366');
   });
 
   it.each([403, 429])('surfaces iTunes rate limiting (HTTP %i) as UpstreamError', async (status) => {
@@ -766,6 +787,38 @@ describe('MusicKit mode: identifiers and search', () => {
     const empty = { results: {}, meta: { results: { order: [], rawOrder: [] } } };
     expect(await searchApple(mkCtx([fixture(url, empty)], calls), { kind: 'track', title: 'Nothing', artist: 'Nobody' }, 100)).toEqual([]);
     expect(calls).toEqual([url]);
+  });
+});
+
+describe('MusicKit mode: items Apple Music cannot play', () => {
+  // MusicKit leaves out attributes.playParams when an Apple Music subscription can't play the item.
+  const withoutPlayParams = (attrs: Record<string, unknown>) => {
+    const { playParams: _playParams, ...rest } = attrs;
+    return rest;
+  };
+  const unplayable = mkSong('1440000021', { ...withoutPlayParams(OUELLI_ATTRS), albumName: 'Raï Love' }, SAHRA);
+
+  it('are left out of ISRC lookups', async () => {
+    const body = { data: [unplayable, OUELLI] };
+    const hits = await appleTracksByIsrc(mkCtx([fixture(mkIsrcUrl('FRZ019601820'), body)]), 'FRZ019601820');
+    expect(hits.map((h) => h.id)).toEqual(['1444130134']);
+  });
+
+  it('are left out of UPC lookups', async () => {
+    const album = { ...SAHRA, attributes: withoutPlayParams(SAHRA_ATTRS), relationships: { artists: { href: '', data: [KHALED] } } };
+    expect(await appleAlbumsByUpc(mkCtx([fixture(mkUpcUrl('00731453398924'), { data: [album] })]), '00731453398924')).toEqual([]);
+  });
+
+  it('are left out of searches', async () => {
+    const url = mkSearchUrl('Khaled+Ouelli+El+Darek', 'songs');
+    const body = { results: { songs: { href: '', data: [searchHit(unplayable), searchHit(OUELLI)] } } };
+    const hits = await searchApple(mkCtx([fixture(url, body)]), { kind: 'track', title: 'Ouelli El Darek', artist: 'Khaled' });
+    expect(hits.map((h) => h.id)).toEqual(['1444130134']);
+  });
+
+  it('still resolve as the source', async () => {
+    const ctx = mkCtx([fixture(mkSongUrl('1440000021'), { data: [unplayable] })]);
+    expect(await getAppleItem(ctx, 'track', '1440000021')).toMatchObject({ id: '1440000021', album: 'Raï Love' });
   });
 });
 
