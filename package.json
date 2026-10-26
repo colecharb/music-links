@@ -5,13 +5,28 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:proxied": "NODE_USE_ENV_PROXY=1 node scripts/dev-proxied.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "smoke": "node scripts/smoke.ts",
-    "db:migrate:local": "wrangler d1 migrations apply music_links --local"
+    "smoke": "NODE_USE_ENV_PROXY=1 node scripts/smoke.ts",
+    "record": "NODE_USE_ENV_PROXY=1 node scripts/record-fixture.ts",
+    "db:migrate:local": "wrangler d1 migrations apply music_links --local",
+    "types": "wrangler types"
   },
   "dependencies": {
     "hono": "^4.13.14",
     "jose": "^6.2.13"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.153.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "esbuild@0.28.2": true,
+    "workerd@1.20260815.1": true,
+    "workerd@1.20261023.1": true
   }
 }

@@ -1,0 +1,19 @@
+name = "music-links"
+main = "src/index.ts"
+compatibility_date = "2026-08-15"
+
+# Resolved-links cache. `wrangler dev` uses a local simulation; for deploy, create the
+# namespace (see README) and put its id here.
+[[kv_namespaces]]
+binding = "LINKS"
+id = "00000000000000000000000000000000"
+
+# Misses log. `wrangler dev` uses a local SQLite file under .wrangler/.
+[[d1_databases]]
+binding = "DB"
+database_name = "music_links"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[observability]
+enabled = true
