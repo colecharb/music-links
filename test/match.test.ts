@@ -159,10 +159,13 @@ describe('scoreTrack: durations', () => {
     [200_000, 1, 203_400, 1, false],
     [200_000, 1, 205_000, 1, false],
     [200_000, 1, 195_000, 1, false],
+    // ±3 s is a hard limit on the reported values; whole-second precision doesn't widen it.
     [200_000, 1, 203_000, 1000, true],
-    [200_600, 1, 204_000, 1000, true],
+    [200_600, 1, 203_600, 1000, true],
+    [200_600, 1, 204_000, 1000, false],
     [200_000, 1, 204_000, 1000, false],
-    [200_000, 1000, 204_000, 1000, true],
+    [200_000, 1000, 203_000, 1000, true],
+    [200_000, 1000, 204_000, 1000, false],
     [200_000, 1000, 205_000, 1000, false],
   ])('%d (precision %d) vs %d (precision %d): accepted %s', (sms, sp, cms, cp, ok) => {
     const r = scoreTrack(track({ title: 'Song', durationMs: sms, durationPrecisionMs: sp }), track({ title: 'Song', durationMs: cms, durationPrecisionMs: cp }));
@@ -187,9 +190,18 @@ describe('scoreTrack: durations', () => {
     expect(unknown).toBeLessThan(near);
   });
 
+  it('whole-second precision softens the score, not the limit', () => {
+    const src = track({ title: 'Song', durationMs: 200_000, durationPrecisionMs: 1000 });
+    const ms = scoreTrack(track({ title: 'Song' }), track({ title: 'Song', durationMs: 202_500 })).details.duration;
+    const seconds = scoreTrack(src, track({ title: 'Song', durationMs: 202_500, durationPrecisionMs: 1000 })).details.duration;
+    expect(seconds).toBeGreaterThan(ms as number);
+    expect(scoreTrack(src, track({ title: 'Song', durationMs: 203_001, durationPrecisionMs: 1000 })).reject).toBe('duration +3.0s');
+  });
+
   it('needs a stronger title when a duration is unknown', () => {
-    const src = track({ title: 'Ouelli El Darek', artists: ['Khaled'], artist: 'Khaled' });
-    const cand = track({ title: 'Weli L Darek', artists: ['Khaled'], artist: 'Khaled' });
+    // The transliteration (consonant skeleton) only counts because the album agrees.
+    const src = track({ title: 'Ouelli El Darek', artists: ['Khaled'], artist: 'Khaled', album: 'Sahra' });
+    const cand = track({ title: 'Weli L Darek', artists: ['Khaled'], artist: 'Khaled', album: 'Sahra' });
     expect(scoreTrack(src, cand).reject).toBeUndefined();
     expect(scoreTrack(src, { ...cand, durationMs: undefined }).reject).toBe('title: 0.85 < 0.9');
   });
@@ -491,7 +503,7 @@ describe('pickBestTrack: ranking and tie-breaks', () => {
   it('does not accept below ACCEPT_TRACK even without a hard reject', () => {
     const src = track({ title: 'Ouelli El Darek', artists: ['Khaled'], artist: 'Khaled', album: 'Sahra' });
     const weak = track({
-      title: 'Weli L Darek',
+      title: 'Ouelli El Darek (feat. Someone Else)',
       artists: ['I Am', 'Khaled'],
       artist: 'I Am, Khaled',
       album: 'Compil',
@@ -538,7 +550,7 @@ describe('verifyTrackById', () => {
 
   it('strict applies the acceptance threshold', () => {
     const s = track({ title: 'Ouelli El Darek', artists: ['Khaled'], artist: 'Khaled', album: 'Sahra' });
-    const weak = track({ title: 'Weli L Darek', artists: ['I Am', 'Khaled'], artist: 'I Am, Khaled', album: 'Compil', durationMs: 203_000 });
+    const weak = track({ title: 'Ouelli El Darek (feat. Someone Else)', artists: ['I Am', 'Khaled'], artist: 'I Am, Khaled', album: 'Compil', durationMs: 203_000 });
     expect(verifyTrackById(s, weak, { strict: true }).reject).toMatch(/^score 0\.\d\d < 0\.7$/);
     expect(verifyTrackById(s, weak, { strict: false }).reject).toBeUndefined();
   });
@@ -618,12 +630,10 @@ describe('scoreAlbum', () => {
     expect(picked.ranked.map((x) => x.item.id)).toEqual(['original', 'reissue']);
   });
 
-  it('edit/extended labels on albums are excused by equal track counts', () => {
+  it('edit/extended labels on albums are not excused by equal track counts (a single has one track either way)', () => {
     const spotify = album({ title: 'Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]', albumType: 'single', trackCount: 1 });
     const deezer = album({ title: 'Get Lucky (feat. Pharrell Williams and Nile Rodgers)', trackCount: 1 });
-    const r = scoreAlbum(spotify, deezer);
-    expect(r.reject).toBeUndefined();
-    expect(r.details.penalty).toBeCloseTo(PENALTY.editExtended, 5);
+    expect(scoreAlbum(spotify, deezer).reject).toBe('version: edit vs studio');
     expect(scoreAlbum(spotify, { ...deezer, trackCount: undefined }).reject).toBe('version: edit vs studio');
     expect(scoreAlbum(spotify, { ...deezer, title: 'Get Lucky (Live)' }).reject).toBe('version: edit vs live');
   });

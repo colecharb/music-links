@@ -259,11 +259,13 @@ describe('review: real catalog data', () => {
   // Portugal. The Man, "Live in the Moment": Apple (ms) and Deezer (whole seconds).
   const ptm = { artists: ['Portugal. The Man'], artist: 'Portugal. The Man' };
 
-  it('Portugal. The Man: two remixes within the duration tolerance are not the same recording', () => {
+  it('Portugal. The Man: two remixes close in duration are not the same recording', () => {
     const apple = track({ ...ptm, title: 'Live in the Moment (Superorganism Remix)', album: 'Live in the Moment (Superorganism Remix) - Single', durationMs: 191_548 });
     const tokimonsta = track({ ...ptm, id: '499632712', title: 'Live in the Moment (TOKiMONSTA Remix)', album: 'Live in the Moment (TOKiMONSTA Remix)', durationMs: 195_000, durationPrecisionMs: 1000 });
     const superorganism = track({ ...ptm, id: '805690922', title: 'Live in the Moment (Superorganism Remix)', album: 'Live in the Moment (Remixes)', durationMs: 191_000, durationPrecisionMs: 1000 });
-    expect(scoreTrack(apple, tokimonsta).reject).toBe('version: remix (superorganism vs tokimonsta)');
+    // 3.45 s apart: over the hard ±3 s limit (whole-second precision no longer widens it), and named apart anyway.
+    expect(scoreTrack(apple, tokimonsta).reject).toBe('duration +3.5s; version: remix (superorganism vs tokimonsta)');
+    expect(scoreTrack(apple, { ...tokimonsta, durationMs: 193_000 }).reject).toBe('version: remix (superorganism vs tokimonsta)');
     expect(pickBestTrack(apple, [tokimonsta]).accepted).toBeNull();
     expect(pickBestTrack(apple, [tokimonsta, superorganism]).accepted?.item.id).toBe('805690922');
   });
@@ -300,10 +302,13 @@ describe('review: real catalog data', () => {
 
   it('Alan Walker: the piano version (2.5s longer) never stands in for the original, or vice versa', () => {
     const piano = faded.find((t) => t.id === '1196294825');
+    const appleOriginal = faded.find((t) => t.id === '1196294581');
     const deezerOriginal = track({ ...aw, title: 'Faded', album: 'Faded', durationMs: 212_000, durationPrecisionMs: 1000 });
-    if (!piano) throw new Error('fixture');
-    expect(scoreTrack(deezerOriginal, piano).reject).toBe('version: studio vs variant:piano');
-    expect(scoreTrack(piano, deezerOriginal).reject).toBe('version: variant:piano vs studio');
+    if (!piano || !appleOriginal) throw new Error('fixture');
+    expect(scoreTrack(appleOriginal, piano).reject).toBe('version: studio vs variant:piano');
+    expect(scoreTrack(piano, appleOriginal).reject).toBe('version: variant:piano vs studio');
+    // Deezer's whole-second 212 s is 3.08 s from the piano version: over the hard limit too.
+    expect(scoreTrack(deezerOriginal, piano).reject).toBe('duration +3.1s; version: studio vs variant:piano');
     expect(pickBestTrack(piano, faded.filter((t) => t !== piano)).accepted).toBeNull();
     expect(pickBestTrack(piano, faded).accepted?.item.id).toBe('1196294825');
   });

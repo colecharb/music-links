@@ -40,6 +40,11 @@ export interface ParsedTitle {
   base: string;
   /** `base` without any trailing bracket group, recognized or not. */
   core: string;
+  /**
+   * Folded unrecognized trailing descriptors: bracket groups ("Pianoforte", "강남스타일") and a " - " suffix
+   * ("Song - Pianoforte"). `core` leaves out the bracket groups but keeps the suffix.
+   */
+  extras: string[];
   /** Folded raw title minus featured clauses. */
   full: string;
   /** Folded featured-artist names. */
@@ -47,6 +52,8 @@ export interface ParsedTitle {
   versions: Set<HardTag>;
   /** SoftTag values and `variant:<words>`. */
   soft: Set<string>;
+  /** The title itself says it is the original recording ("Original Mix", "Album Version"). */
+  original: boolean;
   /**
    * What a version descriptor names besides its kind, per hard tag: the remixer of "Tiësto Remix", the
    * venue and year of "Live at Wembley 1986". Two remixes (or concerts) of one song are different recordings.
@@ -149,6 +156,14 @@ function words(alternatives: string): RegExp {
   return new RegExp(`(?:^| )(?:${alternatives})(?= |$)`, 'u');
 }
 
+/** "Off Vocal" is the usual J-pop/anime label for an instrumental. */
+const EN_INSTRUMENTAL = 'off vocal|without vocals?|no vocals?|vocal less|vocalless';
+/** Japanese labels are written without spaces ("オフボーカルver."), so they match anywhere in a descriptor. */
+const JA_INSTRUMENTAL = 'オフ ?ボーカル|インストゥルメンタル|インスト|伴奏';
+const JA_KARAOKE = 'カラオケ';
+/** Labels stripped as a whole before reading qualifiers, so "Vocal" still names the "Vocal Mix" remix. */
+const LABEL_PHRASE_RE = new RegExp(`${words(EN_INSTRUMENTAL).source}|${JA_INSTRUMENTAL}|${JA_KARAOKE}`, 'gu');
+
 interface Rule {
   re: RegExp;
   hard?: readonly HardTag[];
@@ -167,9 +182,11 @@ const RULES: readonly Rule[] = [
   { re: words('unplugged'), hard: ['live', 'acoustic'] },
   { re: words('acoustic|acustico|acustica|acoustique|akustik|stripped'), hard: ['acoustic'] },
   { re: words('remix|remixes|remixed|rmx|rework|reworked|bootleg|flip|dub|vip|ремикс'), hard: ['remix'] },
-  { re: words('instrumental|instrumentals|inst|инструментал'), hard: ['instrumental'] },
+  { re: words(`instrumental|instrumentals|inst|инструментал|${EN_INSTRUMENTAL}`), hard: ['instrumental'] },
+  { re: new RegExp(JA_INSTRUMENTAL, 'u'), hard: ['instrumental'] },
   { re: words('a cappella|acapella|a capella|acappella'), hard: ['acapella'] },
   { re: words('karaoke|originally performed by|in the style of|backing tracks?'), hard: ['karaoke'] },
+  { re: new RegExp(JA_KARAOKE, 'u'), hard: ['karaoke'] },
   { re: words('demo|demos'), hard: ['demo'] },
   { re: words('sped up|speed up|spedup|nightcore'), hard: ['sped_up'] },
   { re: words('slowed|slowed and reverb|slowed reverb|chopped and screwed|chopped not slopped'), hard: ['slowed'] },
@@ -182,7 +199,10 @@ const RULES: readonly Rule[] = [
     hard: ['edit'],
   },
   {
-    re: words('extended|extended mix|extended version|long version|12 inch|12 version|12 mix|club mix|full length version'),
+    // "Extended Edition" (more tracks) and "Extended Play" (an EP) are not extended mixes.
+    re: words(
+      'extended(?! (?:\\S+ )?edition| play)|extended mix|extended version|long version|12 inch|12 version|12 mix|club mix|full length version',
+    ),
     hard: ['extended'],
   },
   { re: words('taylors version|re recorded|rerecorded|re record|re recording'), hard: ['rerecorded'] },
@@ -198,20 +218,34 @@ const RULES: readonly Rule[] = [
   { re: words('clean|censored|edited'), soft: 'clean' },
 ];
 
-/** Descriptors that carry no version information and are dropped from the title. */
+/** Editions a bonus track is exclusive to ("Japan Bonus Track", "iTunes Bonus Track"). */
+const BONUS_EDITIONS = 'japan|japanese|uk|us|eu|european|international|itunes|amazon|spotify|digital|vinyl|cd|hidden|exclusive|limited';
+/**
+ * Descriptor words that carry no version information ("Official Audio", "Bonus Track", "Album Version").
+ * They are stripped before deciding what a descriptor is: "Original Piano Version" is still a variant.
+ */
 const IGNORABLE_RE = new RegExp(
-  [
-    words(
-      // "LP Version" and "Studio Version" name the album recording, like "Album Version".
-      'album version|lp version|studio version|original mix|original version|main version|album mix|main mix|original|single|ep|bonus tracks?|bonus' +
-        '|soundtrack|ost|bso|motion picture|official|officiel|oficial|ufficiale|audio|video|lyrics?|lyric video' +
-        '|visuali[sz]er|hd|hq|4k|mv|prod|produced by|taken from|letra|paroles|testo|songtext',
-    ).source,
-    '^from ',
-    '^(?:(?:19|20)\\d\\d ?)+$',
-  ].join('|'),
-  'u',
+  words(
+    // "LP Version" and "Studio Version" name the album recording, like "Album Version".
+    'album version|lp version|studio version|original mix|original version|official version|main version|album mix|main mix|original|single|ep|extended play' +
+      `|(?:(?:${BONUS_EDITIONS}) )*bonus tracks?|bonus` +
+      '|soundtrack|ost|bso|motion picture|official|officiel|oficial|ufficiale|audio|music video|video|videoclip|clip|lyrics?|lyric video' +
+      '|visuali[sz]er|hd|hq|4k|mv|letra|paroles|testo|songtext',
+  ).source,
+  'gu',
 );
+/** Soundtrack and cast-album labels in any wording ("Original Broadway Cast Recording", "Original Game Score"). */
+const SOUNDTRACK_RE = words('soundtrack|ost|bso|score|motion picture|cast recording|cast album');
+/** A kind of video ("Official Dance Video", "Video Musical", "Clipe Oficial"): it describes the video, not the recording. */
+const VIDEO_NOUNS = 'video|videoclip|videoclipe|clip|clipe';
+const VIDEO_KIND_RE = new RegExp(`^(?:${VIDEO_NOUNS})(?= |$)|(?:^| )(?:${VIDEO_NOUNS}|visuali[sz]er|mv|m v)$`, 'u');
+/** A whole descriptor that names the original recording ("Original Mix", "Album Version"). */
+const ORIGINAL_LABEL_RE = /^(?:original|original mix|original version|album version|album mix|lp version|studio version|main version|main mix)$/u;
+/** An attribution and everything after it: "From "Frozen 2"", "Theme from Shaft", "Taken from X", "Prod. by X". */
+const ATTRIBUTION_RE =
+  /(?:^| )(?:(?:(?:\S+ )?theme|music|songs|soundtrack) )?(?:from|taken from|as featured in|as heard in|inspired by|produced by|prod)(?= |$).*$/u;
+/** Words that may surround ignorable ones without making a descriptor meaningful ("Official Video with Lyrics"). */
+const FILLER_WORDS: ReadonlySet<string> = new Set(['with', 'and', 'the', 'a', 'an', 'of', 'in', 'by']);
 
 /** First words of "<x> mix" that do not make it a remix (other rules classify them). */
 const NOT_REMIX_MIX = new Set([
@@ -272,14 +306,41 @@ export function classifyDescriptor(folded: string): Classification {
     hard.add('remix');
     recognized = true;
   }
-  if (IGNORABLE_RE.test(folded)) recognized = true;
-  if (!recognized && VERSION_WORD_RE.test(folded)) {
-    const rest = folded.replace(VERSION_WORD_ALL_RE, ' ').trim();
-    if (rest) soft.add(VARIANT_PREFIX + rest.replace(/\s+/g, ' '));
-    recognized = true;
+  if (!recognized) {
+    const untagged = classifyUntagged(folded);
+    recognized = untagged.recognized;
+    if (untagged.variant) soft.add(VARIANT_PREFIX + untagged.variant);
   }
-  const hint = folded === 'single' ? 'single' : folded === 'ep' ? 'ep' : undefined;
+  const hint = folded === 'single' ? 'single' : folded === 'ep' || folded === 'extended play' ? 'ep' : undefined;
   return { hard: [...hard], soft: [...soft], recognized, hint };
+}
+
+function stripIgnorable(folded: string): string {
+  return folded.replace(ATTRIBUTION_RE, ' ').replace(IGNORABLE_RE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Nothing but filler words and years (or nothing at all). */
+function isFiller(s: string): boolean {
+  return s.split(' ').every((w) => !w || FILLER_WORDS.has(w) || YEAR_RE.test(w));
+}
+
+function withoutVersionWords(s: string): string {
+  return s.replace(VERSION_WORD_ALL_RE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A descriptor without hard or soft tags: ignorable when only ignorable words (and filler) remain,
+ * "<words> version" names a variant, anything else is unrecognized ("8D Audio" leaves "8d").
+ */
+function classifyUntagged(folded: string): { recognized: boolean; variant?: string } {
+  const rest = stripIgnorable(folded);
+  if (isFiller(rest)) return { recognized: true };
+  // A video kind naming another take or arrangement ("Piano Video", "Cover Video") is not just a video.
+  const videoKind = VIDEO_KIND_RE.test(folded) && !DISTINCT_PART_RE.test(rest);
+  if (!VERSION_WORD_RE.test(rest)) return { recognized: SOUNDTRACK_RE.test(folded) || videoKind };
+  // "Soundtrack Version" / "Video Version": the only modifier was an ignorable word, which then names the variant.
+  const variant = withoutVersionWords(rest) || withoutVersionWords(folded.replace(ATTRIBUTION_RE, ' '));
+  return variant ? { recognized: true, variant } : { recognized: true };
 }
 
 /** Descriptor words that say what kind of version it is, not whose or where; the rest is the qualifier. */
@@ -316,17 +377,21 @@ function addQualifiers(content: string, out: Partial<Record<HardTag, string[]>>)
     // The year of "Live 1986 (2011 Remaster)" in one part belongs to the remaster, not the performance.
     const remastered = c.soft.includes('remaster');
     const words = folded
+      .replace(LABEL_PHRASE_RE, ' ')
       .split(' ')
       .filter((w) => w && !QUALIFIER_STOPWORDS.has(w) && !REMASTER_WORD_RE.test(w) && !(remastered && YEAR_RE.test(w)));
     for (const t of current) out[t] = [...(out[t] ?? []), ...words];
   }
 }
 
+/** The words that identify which `tag` version a title names ("wembley", "1986"; "tiesto"), if any. */
+export function qualifierWords(t: ParsedTitle, tag: HardTag): string[] {
+  return (t.qualifiers[tag] ?? []).filter(significant);
+}
+
 /** Whether both titles name the same `tag` version specifically ("Live at Wembley 1986" on both sides). */
 export function sameQualifiedVersion(a: ParsedTitle, b: ParsedTitle, tag: HardTag): boolean {
-  const qa = (a.qualifiers[tag] ?? []).filter(significant);
-  const qb = (b.qualifiers[tag] ?? []).filter(significant);
-  return qa.length > 0 && qb.length > 0 && qualifiersCompatible(qa, qb);
+  return qualifiersConfirm(qualifierWords(a, tag), qualifierWords(b, tag));
 }
 
 /** Remixers/venues this similar (character bigrams of the joined words) are the same. */
@@ -355,6 +420,19 @@ export function qualifiersCompatible(a: readonly string[], b: readonly string[])
   const ja = wa.join('');
   const jb = wb.join('');
   return ja.includes(jb) || jb.includes(ja) || bigramDice(ja, jb) >= QUALIFIER_MIN_DICE;
+}
+
+/**
+ * Whether two qualifiers positively name the same version: compatible names on both sides, or a shared year
+ * when neither names anything. Unlike qualifiersCompatible, what can't be compared doesn't pass: "1981" vs
+ * "Aid", or "1986" vs "Wembley 1986" (Queen also played Budapest in 1986).
+ */
+export function qualifiersConfirm(a: readonly string[], b: readonly string[]): boolean {
+  const sa = a.filter(significant);
+  const sb = b.filter(significant);
+  if (!sa.length || !sb.length || !qualifiersCompatible(sa, sb)) return false;
+  const named = (ws: string[]) => ws.some((w) => !YEAR_RE.test(w));
+  return named(sa) === named(sb);
 }
 
 /** Hard tags both titles carry but with incompatible qualifiers, e.g. "remix (tiesto vs david guetta)". */
@@ -433,10 +511,22 @@ function trailingDash(s: string): { head: string; content: string } | null {
   return { head, content };
 }
 
-const FEAT_LEAD_RE = /^(?:(?:feat|ft)\.\s*|(?:feat|ft|featuring|with)\s+|w\/\s*)(.+)$/i;
+const FEAT_LEAD_RE = /^((?:feat|ft)\.\s*|(?:feat|ft|featuring|with)\s+|w\/\s*)(.+)$/i;
+const WITH_LEAD_RE = /^(?:with\s+|w\/)/i;
+/** What "with" introduces when it is not an artist: "(with Lyrics)", "(with Strings)", "(with Full Orchestra)". */
+const NOT_ARTIST_WORDS: ReadonlySet<string> = new Set(
+  (
+    'lyrics lyric letra paroles subtitles commentary intro outro strings string orchestra orchestral choir chorus ' +
+    'piano guitar vocals vocal quartet the a an full and'
+  ).split(' '),
+);
 const FEAT_INNER_RE = /^(.*?)(?:\s*[-,;]\s*|\s+)(?:(?:feat|ft)\.\s*|(?:feat|ft|featuring)\s+)(.+)$/i;
 const FEAT_BARE_RE = /\s+(?:(?:feat|ft)\.\s*|(?:feat|ft|featuring)\s+)(.+?)(?=\s*[([{]|\s+-\s+|$)/i;
 const FEAT_SPLIT_RE = /\s*[,;&]\s*|\s+(?:and|x|×|\+)\s+/i;
+
+function isGenericWith(lead: string, rest: string): boolean {
+  return WITH_LEAD_RE.test(lead) && fold(rest).split(' ').every((w) => NOT_ARTIST_WORDS.has(w));
+}
 
 function featuredNames(s: string): string[] {
   return s
@@ -453,8 +543,8 @@ function extractFeatured(s: string, out: string[]): string {
     const g = groups[k];
     if (!g) continue;
     const lead = FEAT_LEAD_RE.exec(g.content);
-    if (lead) {
-      out.unshift(...featuredNames(lead[1] ?? ''));
+    if (lead && !isGenericWith(lead[1] ?? '', lead[2] ?? '')) {
+      out.unshift(...featuredNames(lead[2] ?? ''));
       t = t.slice(0, g.start) + ' ' + t.slice(g.end);
       continue;
     }
@@ -493,12 +583,14 @@ function parse(raw: string, album: boolean): ParsedAlbumTitle {
   let albumHint: 'single' | 'ep' | undefined;
   const kept: string[] = [];
   const qualifiers: Partial<Record<HardTag, string[]>> = {};
+  let original = false;
 
   const apply = (c: Classification, content: string) => {
     for (const t of c.hard) versions.add(t);
     for (const t of c.soft) soft.add(t);
     if (album && c.hint) albumHint ??= c.hint;
     if (c.hard.length) addQualifiers(content, qualifiers);
+    if (ORIGINAL_LABEL_RE.test(fold(content))) original = true;
   };
 
   for (;;) {
@@ -530,12 +622,19 @@ function parse(raw: string, album: boolean): ParsedAlbumTitle {
   const core = fold(s) || full;
   const base = fold([s, ...kept].join(' ')) || full;
   if (album) {
-    if (LIVE_ALBUM_RE.test(base)) versions.add('live');
+    if (LIVE_ALBUM_RE.test(base)) {
+      // "Live at Wembley Stadium" names its concert in the title itself.
+      if (!versions.has('live')) addQualifiers([s, ...kept].join(' '), qualifiers);
+      versions.add('live');
+    }
     if (/(?:^| )unplugged(?= |$)/u.test(base)) versions.add('acoustic');
     if (REMIX_ALBUM_RE.test(base)) versions.add('remix');
     if (INSTRUMENTAL_ALBUM_RE.test(base)) versions.add('instrumental');
   }
-  return { raw, base, core, full, featured: [...new Set(featured)], versions, soft, qualifiers, albumHint };
+  // The loop stops at a " - " suffix only when it is unrecognized.
+  const suffix = trailingDash(s)?.content;
+  const extras = [...(suffix ? [suffix] : []), ...kept].map(fold).filter(Boolean);
+  return { raw, base, core, full, extras, featured: [...new Set(featured)], versions, soft, original, qualifiers, albumHint };
 }
 
 /** Parse a track title into its comparable parts, featured artists and version tags. */
@@ -579,7 +678,8 @@ export function splitArtists(names: string[]): string[] {
   return [...out];
 }
 
-export const HONORIFICS: ReadonlySet<string> = new Set(['cheb', 'cheba', 'chaba', 'cheikh', 'cheikha', 'the', 'dj', 'mc']);
+/** Raï honorifics and "The". Not "DJ"/"MC": "DJ Khaled" and "Khaled" are two artists. */
+export const HONORIFICS: ReadonlySet<string> = new Set(['cheb', 'cheba', 'chaba', 'cheikh', 'cheikha', 'the']);
 
 /** "Cheb Khaled" -> "khaled", "The Beatles" -> "beatles". Never returns an empty name. */
 export function stripHonorifics(name: string): string {
@@ -654,8 +754,12 @@ export function skeleton(s: string): string {
 
 /** Penalty for comparing titles with their unrecognized trailing groups removed. */
 export const CORE_PENALTY = 0.05;
-/** Similarity cap for an unexplained one-sided bracket group when no duration can confirm the match. */
-export const UNEXPLAINED_GROUP_CAP = 0.85;
+/**
+ * Similarity cap for an unexplained bracket group: on one side only, or different on each side ("(Pianoforte)",
+ * "(Orchestra)" vs "(Pianoforte)"). Below every title threshold, because a matching duration doesn't explain
+ * it: re-recordings are made to the original's length.
+ */
+export const UNEXPLAINED_GROUP_CAP = 0.75;
 /** Transliteration matches never count as more than this. */
 export const SKELETON_CAP = 0.85;
 /** Shorter skeletons collide too easily ("Lose" / "Loose" / "Lies"). */
@@ -744,17 +848,96 @@ function differingWords(a: string, b: string): string[] {
   return [...count].filter(([, n]) => n !== 0).map(([t]) => t);
 }
 
-function extraGroups(t: ParsedTitle): string {
-  return t.base.startsWith(t.core) ? t.base.slice(t.core.length).trim() : t.base;
+/** Each folded group as many times as it is in `a` and not in `b` (spaces ignored: "Piano Forte" = "Pianoforte"). */
+function groupsOnlyIn(a: readonly string[], b: readonly string[]): string[] {
+  const left = b.map((g) => g.replace(/ /g, ''));
+  return a.filter((g) => {
+    const i = left.indexOf(g.replace(/ /g, ''));
+    if (i < 0) return true;
+    left.splice(i, 1);
+    return false;
+  });
 }
 
-/** Whether comparing cores (titles without unrecognized trailing groups) is meaningful. */
-function coresComparable(a: ParsedTitle, b: ParsedTitle): boolean {
-  const ea = extraGroups(a);
-  const eb = extraGroups(b);
-  if (!ea && !eb) return false;
-  if (ea && eb && ea !== eb) return false;
-  return !DISTINCT_PART_RE.test(comparable(ea || eb));
+/** Writing systems whose letters a string uses. Japanese kana and Han count as one; script-neutral letters don't count. */
+const SCRIPTS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['latin', /\p{Script=Latin}/u],
+  ['cjk', /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u],
+  ['hangul', /\p{Script=Hangul}/u],
+  ['cyrillic', /\p{Script=Cyrillic}/u],
+  ['greek', /\p{Script=Greek}/u],
+  ['arabic', /\p{Script=Arabic}/u],
+  ['hebrew', /\p{Script=Hebrew}/u],
+  ['thai', /\p{Script=Thai}/u],
+  ['devanagari', /\p{Script=Devanagari}/u],
+];
+const SCRIPTED_LETTER_RE = /(?![\p{Script=Common}\p{Script=Inherited}])\p{L}/u;
+
+function scriptsOf(s: string): Set<string> {
+  const out = new Set<string>();
+  for (const c of s) {
+    if (!SCRIPTED_LETTER_RE.test(c)) continue;
+    out.add(SCRIPTS.find(([, re]) => re.test(c))?.[0] ?? 'other');
+  }
+  return out;
+}
+
+/** A group in another script than the rest of its title is the title translated or romanized ("Gangnam Style (강남스타일)"). */
+function isTranslation(group: string, title: ParsedTitle): boolean {
+  const g = scriptsOf(group);
+  const t = scriptsOf(withoutWords(title.base, group));
+  return g.size > 0 && t.size > 0 && [...g].every((x) => !t.has(x));
+}
+
+/** `text` minus one occurrence of each word of `remove`. */
+function withoutWords(text: string, remove: string): string {
+  const left = text.split(' ');
+  for (const w of remove.split(' ')) {
+    const i = left.indexOf(w);
+    if (i >= 0) left.splice(i, 1);
+  }
+  return left.join(' ');
+}
+
+/** Whether the group only names credited artists ("Oran Marseille (Khaled - I Am)"). */
+function namesCredits(group: string, credits: readonly string[]): boolean {
+  const names = credits.filter(Boolean).map((c) => c.split(' '));
+  const words = group.split(' ');
+  let named = false;
+  for (let i = 0; i < words.length; ) {
+    if (FILLER_WORDS.has(words[i] ?? '')) {
+      i++;
+      continue;
+    }
+    const at = i;
+    const longest = Math.max(0, ...names.filter((n) => n.every((w, k) => words[at + k] === w)).map((n) => n.length));
+    if (!longest) return false;
+    named = true;
+    i += longest;
+  }
+  return named;
+}
+
+interface GroupComparison {
+  /** Groups on one side only that neither translate the title nor name its artists. */
+  unexplained: string[];
+  /** [translated group, other title's core] pairs worth comparing. */
+  translations: Array<[string, string]>;
+}
+
+function compareGroups(a: ParsedTitle, b: ParsedTitle, credits: readonly string[]): GroupComparison {
+  const unexplained: string[] = [];
+  const translations: Array<[string, string]> = [];
+  for (const [own, other] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    for (const g of groupsOnlyIn(own.extras, other.extras)) {
+      if (isTranslation(g, own)) translations.push([g, other.core]);
+      else if (!namesCredits(g, credits)) unexplained.push(g);
+    }
+  }
+  return { unexplained, translations };
 }
 
 function pairSimilarity(a: string, b: string, fuzzyChars: boolean): number {
@@ -770,11 +953,13 @@ export interface TitleSimilarityOptions {
    */
   fuzzyChars?: boolean;
   /**
-   * Default true. false: an unrecognized bracket group on one side only ("Never Gonna Give You Up" /
-   * "... (Pianoforte)") caps the similarity at UNEXPLAINED_GROUP_CAP. That difference is unexplained, so
-   * only a matching duration can show it's the same recording.
+   * Default false. true: consonant skeletons of Latin titles count, for transliterations ("Ouelli El Darek" /
+   * "Weli L Darek"). Unrelated words share skeletons too ("Stronger" / "Strange"), so pass true only with
+   * corroborating evidence such as the same album. Cyrillic/Greek transliterations always count.
    */
-  cores?: boolean;
+  skeleton?: boolean;
+  /** Folded artist names of both sides: a bracket group that only names them explains itself. */
+  credits?: readonly string[];
 }
 
 /** Similarity of two parsed titles in 0..1. Version tags are not considered here. */
@@ -782,22 +967,25 @@ export function titleSimilarity(a: ParsedTitle, b: ParsedTitle, opts: TitleSimil
   const fuzzyChars = opts.fuzzyChars ?? true;
   const ab = comparable(a.base);
   const bb = comparable(b.base);
-  let best = pairSimilarity(ab, bb, fuzzyChars);
-  const cores = opts.cores ?? true;
-  if (cores && coresComparable(a, b)) {
-    best = Math.max(best, pairSimilarity(comparable(a.core), comparable(b.core), fuzzyChars) - CORE_PENALTY);
+  const baseSim = pairSimilarity(ab, bb, fuzzyChars);
+  let best = baseSim;
+  const groups = compareGroups(a, b, opts.credits ?? []);
+  const corePairs = groups.unexplained.length ? groups.translations : [[a.core, b.core] as [string, string], ...groups.translations];
+  for (const [x, y] of corePairs) {
+    best = Math.max(best, pairSimilarity(comparable(x), comparable(y), fuzzyChars) - CORE_PENALTY);
   }
-  const unexplained = !cores && extraGroups(a) !== extraGroups(b);
   const ta = transliterate(ab);
   const tb = transliterate(bb);
-  if (ta !== ab || tb !== bb) best = Math.max(best, pairSimilarity(ta, tb, fuzzyChars) - TRANSLIT_PENALTY);
+  const transliterated = ta !== ab || tb !== bb;
+  if (transliterated) best = Math.max(best, pairSimilarity(ta, tb, fuzzyChars) - TRANSLIT_PENALTY);
   const sa = skeleton(ta);
   const sb = skeleton(tb);
-  if (Array.from(sa).length >= SKELETON_MIN_LENGTH && Array.from(sb).length >= SKELETON_MIN_LENGTH) {
+  if ((opts.skeleton || transliterated) && Array.from(sa).length >= SKELETON_MIN_LENGTH && Array.from(sb).length >= SKELETON_MIN_LENGTH) {
     best = Math.max(best, Math.min(SKELETON_CAP, bigramDice(sa, sb)));
   }
   if (numbersOf(ab) !== numbersOf(bb)) best = Math.min(best, NUMBER_MISMATCH_CAP);
   if (DISTINCT_PART_RE.test(differingWords(ab, bb).join(' '))) best = Math.min(best, DISTINCT_PART_CAP);
-  if (unexplained) best = Math.min(best, UNEXPLAINED_GROUP_CAP);
+  // The same words bracketed differently ("Sunshine (The Light)" / "Sunshine The Light") are not unexplained.
+  if (groups.unexplained.length && baseSim < 1) best = Math.min(best, UNEXPLAINED_GROUP_CAP);
   return Math.max(0, Math.min(1, best));
 }

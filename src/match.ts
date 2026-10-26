@@ -8,6 +8,8 @@ import {
   parseAlbumTitle,
   parseTitle,
   qualifierConflicts,
+  qualifiersConfirm,
+  qualifierWords,
   sameQualifiedVersion,
   skeleton,
   splitArtists,
@@ -20,8 +22,9 @@ import {
   type ParsedTitle,
 } from './normalize';
 
+/** Hard limit on the reported durations, whatever their precision. */
 export const DURATION_TOLERANCE_MS = 3000;
-/** Added per side whose duration is whole seconds (durationPrecisionMs >= 1000). */
+/** Per side whose duration is whole seconds (durationPrecisionMs >= 1000): softens the score, never the limit. */
 export const DURATION_PRECISION_SLACK_MS = 500;
 /** Durations closer than this score as identical. */
 export const DURATION_EXACT_MS = 1000;
@@ -73,7 +76,7 @@ export const PENALTY = {
    * when everything else agrees.
    */
   featuredUncredited: 0.15,
-  /** Edit vs extended vs original labels whose durations (albums: track counts) agree. */
+  /** Edit vs extended vs original labels whose durations agree. */
   editExtended: 0.05,
   /** Albums: single/EP vs album. */
   albumType: 0.1,
@@ -81,6 +84,8 @@ export const PENALTY = {
 
 /** Edit/extended labels are applied inconsistently across platforms; a matching duration settles it. */
 const DURATION_PROVABLE_TAGS: ReadonlySet<HardTag> = new Set(['edit', 'extended']);
+/** Tags whose recordings are many (concerts, remixes): without a duration, only a named venue or remixer tells them apart. */
+const QUALIFIED_WITHOUT_DURATION: readonly HardTag[] = ['live', 'remix'];
 
 const VARIOUS_ARTISTS: ReadonlySet<string> = new Set([
   'various artists',
@@ -257,8 +262,9 @@ function compareDurations(src: TrackMeta, cand: TrackMeta): DurationCheck {
     (precisionOf(src) >= 1000 ? DURATION_PRECISION_SLACK_MS : 0) + (precisionOf(cand) >= 1000 ? DURATION_PRECISION_SLACK_MS : 0);
   if (!src.durationMs || !cand.durationMs) return { known: false, slackMs, within: true, score: DURATION_SCORE_UNKNOWN };
   const diffMs = cand.durationMs - src.durationMs;
+  const within = Math.abs(diffMs) <= DURATION_TOLERANCE_MS;
+  // Whole-second values are rounded or truncated, so their difference scores as if it were smaller.
   const effective = Math.max(0, Math.abs(diffMs) - slackMs);
-  const within = effective <= DURATION_TOLERANCE_MS;
   const score =
     effective <= DURATION_EXACT_MS
       ? 1
@@ -277,19 +283,27 @@ function formatSeconds(ms: number): string {
   return `${ms >= 0 ? '+' : '-'}${(Math.abs(ms) / 1000).toFixed(1)}s`;
 }
 
-/**
- * Title tags, plus 'live' when the containing album is a live album ("Hafla (Live)", "Live at Wembley"),
- * and 'acoustic' too for an unplugged album (every track on it is both).
- */
-function trackTags(title: ParsedTitle, album: ParsedAlbumTitle | undefined): Set<HardTag> {
-  const tags = new Set(title.versions);
-  // A single named after its track ("Live in the Moment") is only live through its own descriptors.
+interface TrackTags {
+  /** Title tags, plus 'live' (and 'acoustic' if unplugged) when the album is a live album ("Hafla (Live)"). */
+  strong: Set<HardTag>;
+  /**
+   * `strong` plus every other hard tag of the album title ("Instrumentals", "(Remixes)", "(Sped Up)"). Such
+   * releases sometimes include the original too, so these only decide search hits.
+   */
+  all: Set<HardTag>;
+}
+
+function trackTags(title: ParsedTitle, album: ParsedAlbumTitle | undefined): TrackTags {
+  const strong = new Set(title.versions);
+  // A single named after its track ("Live in the Moment") only carries the tags of its own descriptors.
   const albumTags = album && album.base === title.base ? parseTitle(album.raw).versions : album?.versions;
   if (albumTags?.has('live')) {
-    tags.add('live');
-    if (albumTags.has('acoustic')) tags.add('acoustic');
+    strong.add('live');
+    if (albumTags.has('acoustic')) strong.add('acoustic');
   }
-  return tags;
+  // "Song (Original Mix)" on a remix EP says itself that it is not one of the remixes.
+  const inherited = title.original ? [] : (albumTags ?? []);
+  return { strong, all: new Set([...strong, ...inherited]) };
 }
 
 /**
@@ -311,6 +325,58 @@ function variants(soft: ReadonlySet<string>): string[] {
 function cognateVariants(a: string[], b: string[]): boolean {
   const close = (x: string, ys: string[]) => ys.some((y) => bigramDice(x.slice(VARIANT_PREFIX.length), y.slice(VARIANT_PREFIX.length)) >= VARIANT_COGNATE_MIN_DICE);
   return a.every((x) => close(x, b)) && b.every((y) => close(y, a));
+}
+
+/**
+ * An unclassified "<words> version" on one side only (Piano, Spanish, 10 Minute) is another recording, even
+ * at a near-identical duration ("Faded" vs "Faded (Piano Version)": 2.5s apart). Look-alike labels on both
+ * sides ("Mixed Version" / "Version Mixte") may be one version labelled in two languages, which only an equal
+ * length can show.
+ */
+function variantReason(a: ParsedTitle, b: ParsedTitle, sameLength: boolean): string | undefined {
+  const va = variants(a.soft);
+  const vb = variants(b.soft);
+  if (!symmetricDiff(new Set(va), new Set(vb)).length) return undefined;
+  if (va.length && vb.length && cognateVariants(va, vb) && sameLength) return undefined;
+  return `${tagLabel(new Set(va))} vs ${tagLabel(new Set(vb))}`;
+}
+
+/** Folded artist names of both sides, with and without honorifics, for titleSimilarity's `credits`. */
+function creditNames(a: ArtistSide, b: ArtistSide): string[] {
+  const names = splitArtists([...a.artists, a.artist, ...b.artists, b.artist]);
+  return unique([...names, ...names.map(stripHonorifics)]);
+}
+
+/**
+ * Qualifier of a hard tag from the title, else from the album title ("Hungarian Rhapsody (Live In Budapest /
+ * 1986)"). An official remix is often named only by its new guest ("Despacito (feat. Justin Bieber) [Remix]").
+ */
+function qualifierOf(title: ParsedTitle, album: ParsedAlbumTitle | undefined, tag: HardTag): string[] {
+  const own = qualifierWords(title, tag);
+  if (own.length) return own;
+  const fromAlbum = album ? qualifierWords(album, tag) : [];
+  if (fromAlbum.length || tag !== 'remix') return fromAlbum;
+  return title.featured.flatMap((name) => name.split(' '));
+}
+
+interface TrackSide {
+  title: ParsedTitle;
+  album?: ParsedAlbumTitle;
+  tags: TrackTags;
+}
+
+/**
+ * Without a duration, "Song (Live)" could be any concert and "Song (Remix)" any remix: both sides must name
+ * the same venue/remixer (or year). `conflicted` tags are already reported as title qualifier conflicts.
+ */
+function unconfirmedQualifiers(src: TrackSide, cand: TrackSide, conflicted: ReadonlySet<HardTag>): string[] {
+  const tags = QUALIFIED_WITHOUT_DURATION.filter((t) => src.tags.all.has(t) && cand.tags.all.has(t) && !conflicted.has(t));
+  return tags.flatMap((tag) => {
+    const qs = qualifierOf(src.title, src.album, tag);
+    const qc = qualifierOf(cand.title, cand.album, tag);
+    if (qualifiersConfirm(qs, qc)) return [];
+    return [`${tag} (${qs.join(' ') || 'unnamed'} vs ${qc.join(' ') || 'unnamed'}) without a duration`];
+  });
 }
 
 /** Featured artists from the title count as credits (Apple puts them in the title, Spotify in the artist list). */
@@ -360,20 +426,32 @@ function evaluateTrack(src: TrackMeta, cand: TrackMeta): TrackEval {
   const sa = src.album ? parseAlbumTitle(src.album) : undefined;
   const ca = cand.album ? parseAlbumTitle(cand.album) : undefined;
 
-  const artist = artistMatch(withFeatured(src, st), withFeatured(cand, ct));
+  const srcCredits = withFeatured(src, st);
+  const candCredits = withFeatured(cand, ct);
+  const credits = creditNames(srcCredits, candCredits);
+  const artist = artistMatch(srcCredits, candCredits);
   const duration = compareDurations(src, cand);
-  // Without a duration, near-miss spellings ("Animals" / "Animal") and unexplained bracket groups
-  // ("(Pianoforte)") are not evidence of the same song.
-  const title = titleSimilarity(st, ct, { fuzzyChars: duration.known, cores: duration.known });
+  const albumSim = sa && ca ? titleSimilarity(sa, ca, { credits }) : ALBUM_SIM_UNKNOWN;
+  // Without a duration, near-miss spellings ("Animals" / "Animal") are not evidence of the same song, nor is
+  // a bracket group naming the artists ("Wake Me Up (Avicii By Avicii)" is another recording).
+  // Consonant skeletons ("Ouelli El Darek" / "Weli L Darek") need the same album to back them up.
+  const title = titleSimilarity(st, ct, {
+    fuzzyChars: duration.known,
+    skeleton: albumSim >= ALBUM_TITLE_MIN,
+    credits: duration.known ? credits : [],
+  });
   const titleMin = duration.known ? TITLE_MIN : TITLE_MIN_NO_DURATION;
-  const albumSim = sa && ca ? titleSimilarity(sa, ca) : ALBUM_SIM_UNKNOWN;
 
   const srcTags = trackTags(st, sa);
   const candTags = trackTags(ct, ca);
-  const tagDiff = symmetricDiff(srcTags, candTags);
   const durationAgrees = duration.known && duration.within;
-  const provenByDuration = tagDiff.length > 0 && tagDiff.every((t) => DURATION_PROVABLE_TAGS.has(t)) && durationAgrees;
-  const conflicts = conflictLabels(st, ct);
+  const proven = (diff: HardTag[]) => durationAgrees && diff.every((t) => DURATION_PROVABLE_TAGS.has(t));
+  const strongDiff = symmetricDiff(srcTags.strong, candTags.strong);
+  const allDiff = symmetricDiff(srcTags.all, candTags.all);
+  const strongMismatch = strongDiff.length > 0 && !proven(strongDiff);
+  const albumMismatch = !strongMismatch && allDiff.length > 0 && !proven(allDiff);
+  const provenByDuration = !strongMismatch && !albumMismatch && (strongDiff.length > 0 || allDiff.length > 0);
+  const conflicts = qualifierConflicts(st, ct);
   const srcCompilation = isCompilationTrack(src, sa);
   const candCompilation = isCompilationTrack(cand, ca);
   // Two live recordings on different original releases are different concerts, however close their
@@ -381,8 +459,8 @@ function evaluateTrack(src: TrackMeta, cand: TrackMeta): TrackEval {
   // apart), unless both titles name the same concert. Compilations and singles named after the track
   // reuse recordings, so they are excused.
   const otherConcert =
-    srcTags.has('live') &&
-    candTags.has('live') &&
+    srcTags.strong.has('live') &&
+    candTags.strong.has('live') &&
     sa !== undefined &&
     ca !== undefined &&
     !srcCompilation &&
@@ -392,27 +470,29 @@ function evaluateTrack(src: TrackMeta, cand: TrackMeta): TrackEval {
     albumSim < ALBUM_TITLE_MIN &&
     !sameQualifiedVersion(st, ct, 'live');
   const versionReasons = [
-    ...(tagDiff.length > 0 && !provenByDuration ? [`${tagLabel(srcTags)} vs ${tagLabel(candTags)}`] : []),
-    ...conflicts,
+    ...(strongMismatch ? [`${tagLabel(srcTags.strong)} vs ${tagLabel(candTags.strong)}`] : []),
+    ...conflicts.map((c) => c.label),
   ];
   const versionReject = versionReasons.length ? `version: ${versionReasons.join(', ')}` : undefined;
-  // An unclassified "<words> version" on one side only (Piano, Spanish, 10 Minute) is another recording
-  // even at a near-identical duration ("Faded" vs "Faded (Piano Version)": 2.5s apart). Look-alike labels
-  // on both sides ("Mixed Version" / "Version Mixte") may be one version labelled in two languages, which
-  // only a matching duration can show.
-  const sv = variants(st.soft);
-  const cv = variants(ct.soft);
-  const variantMismatch =
-    symmetricDiff(new Set(sv), new Set(cv)).length > 0 && !(sv.length && cv.length && cognateVariants(sv, cv) && durationAgrees);
+  const variantMismatch = variantReason(st, ct, durationAgrees);
+  const unconfirmed = duration.known
+    ? []
+    : unconfirmedQualifiers(
+        { title: st, album: sa, tags: srcTags },
+        { title: ct, album: ca, tags: candTags },
+        new Set(conflicts.map((c) => c.tag)),
+      );
   const searchReasons = [
-    ...(variantMismatch ? [`${tagLabel(new Set(sv))} vs ${tagLabel(new Set(cv))}`] : []),
+    ...(albumMismatch ? [`${tagLabel(srcTags.all)} vs ${tagLabel(candTags.all)}`] : []),
+    ...(variantMismatch ? [variantMismatch] : []),
+    ...unconfirmed,
     ...(otherConcert ? [`live on ${src.album} vs ${cand.album}`] : []),
   ];
   const searchReject = searchReasons.length ? `version: ${searchReasons.join(', ')}` : undefined;
 
   const featuredDisjoint =
     st.featured.length > 0 && ct.featured.length > 0 && !anyEq(splitArtists(st.featured), splitArtists(ct.featured));
-  const featuredUncredited = hasUncredited(st.featured, withFeatured(cand, ct)) || hasUncredited(ct.featured, withFeatured(src, st));
+  const featuredUncredited = hasUncredited(st.featured, candCredits) || hasUncredited(ct.featured, srcCredits);
   const penalty =
     softPenalty(st.soft, ct.soft) +
     explicitPenalty(src, cand) +
@@ -437,7 +517,7 @@ function evaluateTrack(src: TrackMeta, cand: TrackMeta): TrackEval {
   };
   if (duration.diffMs !== undefined) details.durationDiffMs = duration.diffMs;
   if (artist.note) details.artistNote = artist.note;
-  if (srcTags.size || candTags.size) details.tags = `${tagLabel(srcTags)} vs ${tagLabel(candTags)}`;
+  if (srcTags.all.size || candTags.all.size) details.tags = `${tagLabel(srcTags.all)} vs ${tagLabel(candTags.all)}`;
   return { artist, title, titleMin, duration, versionReject, searchReject, score, details };
 }
 
@@ -500,6 +580,8 @@ interface AlbumEval {
   title: number;
   trackDiff?: number;
   versionReject?: string;
+  /** Variant labels: like tracks, they decide search hits but not a UPC from the source platform. */
+  searchReject?: string;
   score: number;
   details: Details;
 }
@@ -508,7 +590,7 @@ function evaluateAlbum(src: AlbumMeta, cand: AlbumMeta): AlbumEval {
   const st = parseAlbumTitle(src.title);
   const ct = parseAlbumTitle(cand.title);
   const artist = artistMatch(src, cand);
-  const title = titleSimilarity(st, ct);
+  const title = titleSimilarity(st, ct, { credits: creditNames(src, cand) });
 
   const trackDiff =
     src.trackCount !== undefined && cand.trackCount !== undefined ? Math.abs(src.trackCount - cand.trackCount) : undefined;
@@ -523,14 +605,15 @@ function evaluateAlbum(src: AlbumMeta, cand: AlbumMeta): AlbumEval {
         ? YEAR_SCORE.close
         : YEAR_SCORE.far;
 
+  // Unlike durations, equal track counts prove nothing about edit/extended labels: a single has one track either way.
   const tagDiff = symmetricDiff(st.versions, ct.versions);
-  // Same rule as tracks, with equal track counts standing in for equal durations.
-  const provenByTrackCount = tagDiff.length > 0 && tagDiff.every((t) => DURATION_PROVABLE_TAGS.has(t)) && trackDiff === 0;
   const versionReasons = [
-    ...(tagDiff.length > 0 && !provenByTrackCount ? [`${tagLabel(st.versions)} vs ${tagLabel(ct.versions)}`] : []),
+    ...(tagDiff.length > 0 ? [`${tagLabel(st.versions)} vs ${tagLabel(ct.versions)}`] : []),
     ...conflictLabels(st, ct),
   ];
   const versionReject = versionReasons.length ? `version: ${versionReasons.join(', ')}` : undefined;
+  const variantMismatch = variantReason(st, ct, trackDiff === 0);
+  const searchReject = variantMismatch ? `version: ${variantMismatch}` : undefined;
 
   const deluxeMismatch = st.soft.has('deluxe') !== ct.soft.has('deluxe');
   const otherSoft = (s: Set<string>) => new Set([...s].filter((t) => t !== 'deluxe'));
@@ -541,8 +624,7 @@ function evaluateAlbum(src: AlbumMeta, cand: AlbumMeta): AlbumEval {
     softPenalty(otherSoft(st.soft), otherSoft(ct.soft)) +
     explicitPenalty(src, cand) +
     (sl && cl && sl !== cl ? PENALTY.albumType : 0) +
-    (isCompilationAlbum(src, st) !== isCompilationAlbum(cand, ct) ? PENALTY.compilation : 0) +
-    (provenByTrackCount ? PENALTY.editExtended : 0);
+    (isCompilationAlbum(src, st) !== isCompilationAlbum(cand, ct) ? PENALTY.compilation : 0);
   const weighted =
     ALBUM_WEIGHTS.title * title +
     ALBUM_WEIGHTS.artist * artist.score +
@@ -561,7 +643,7 @@ function evaluateAlbum(src: AlbumMeta, cand: AlbumMeta): AlbumEval {
   if (trackDiff !== undefined) details.trackDiff = trackDiff;
   if (artist.note) details.artistNote = artist.note;
   if (st.versions.size || ct.versions.size) details.tags = `${tagLabel(st.versions)} vs ${tagLabel(ct.versions)}`;
-  return { artist, title, trackDiff, versionReject, score, details };
+  return { artist, title, trackDiff, versionReject, searchReject, score, details };
 }
 
 function trackCountReason(src: AlbumMeta, cand: AlbumMeta): string {
@@ -576,6 +658,7 @@ export function scoreAlbum(src: AlbumMeta, cand: AlbumMeta): ScoreResult {
   if (e.title < ALBUM_TITLE_MIN) reasons.push(`title: ${formatScore(e.title)} < ${ALBUM_TITLE_MIN}`);
   if (e.trackDiff !== undefined && e.trackDiff > TRACK_COUNT_TOLERANCE) reasons.push(trackCountReason(src, cand));
   if (e.versionReject) reasons.push(e.versionReject);
+  if (e.searchReject) reasons.push(e.searchReject);
   return result(e.score, reasons, e.details);
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bigramDice,
   classifyDescriptor,
+  UNEXPLAINED_GROUP_CAP,
   fold,
   parseAlbumTitle,
   parseTitle,
@@ -375,8 +376,9 @@ describe('stripHonorifics', () => {
     ['Cheikh Lô', 'lo'],
     ['Cheikha Rimitti', 'rimitti'],
     ['The Beatles', 'beatles'],
-    ['DJ Snake', 'snake'],
-    ['MC Solaar', 'solaar'],
+    // "DJ Khaled" and "Khaled" are two artists.
+    ['DJ Snake', 'dj snake'],
+    ['MC Solaar', 'mc solaar'],
     ['The The', 'the'],
     ['DJ', 'dj'],
     ['Theory of a Deadman', 'theory of a deadman'],
@@ -439,8 +441,9 @@ describe('titleSimilarity', () => {
     ['Symphony No. 5', 'Symphony Number 5', 1],
     ['Song Part II', 'Song Part 2', 1],
     ["Rock 'n' Roll Train", 'Rock and Roll Train', 1],
-    ['Oran Marseille (Khaled - I Am)', 'Oran Marseille', 0.95],
-    ['Ouelli El Darek', 'Weli L Darek', 0.85],
+    // Without credits or corroboration: an unexplained group, an unrelated consonant skeleton.
+    ['Oran Marseille (Khaled - I Am)', 'Oran Marseille', 0.7272727],
+    ['Ouelli El Darek', 'Weli L Darek', 0.6666667],
     ['Intro', 'Intro', 1],
     ['Interlude (Live)', 'Interlude', 1],
     ['Группа крови', 'Gruppa Krovi', 0.95],
@@ -463,6 +466,20 @@ describe('titleSimilarity', () => {
     ['Song Title (Cover)', 'Song Title'],
   ])('%j vs %j stays below 0.8', (a, b) => {
     expect(sim(a, b)).toBeLessThan(0.8);
+  });
+
+  it('a group that only names the credited artists explains itself', () => {
+    const credits = ['khaled', 'i am'];
+    expect(titleSimilarity(parseTitle('Oran Marseille (Khaled - I Am)'), parseTitle('Oran Marseille'), { credits })).toBeCloseTo(0.95, 5);
+    expect(titleSimilarity(parseTitle('Oran Marseille (Khaled - Remake)'), parseTitle('Oran Marseille'), { credits })).toBeLessThanOrEqual(UNEXPLAINED_GROUP_CAP);
+  });
+
+  it('consonant skeletons count only when the caller has corroboration', () => {
+    expect(titleSimilarity(parseTitle('Ouelli El Darek'), parseTitle('Weli L Darek'), { skeleton: true })).toBeCloseTo(0.85, 5);
+    expect(titleSimilarity(parseTitle('Stronger'), parseTitle('Strange'), { skeleton: true })).toBeCloseTo(0.85, 5);
+    expect(titleSimilarity(parseTitle('Stronger'), parseTitle('Strange'))).toBeLessThan(0.8);
+    // Cyrillic transliteration changes a side, which is evidence enough.
+    expect(sim('Группа крови', 'Gruppa Krovi')).toBeCloseTo(0.95, 5);
   });
 
   it('is symmetric', () => {
