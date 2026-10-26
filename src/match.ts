@@ -97,7 +97,7 @@ const VARIOUS_ARTISTS: ReadonlySet<string> = new Set([
 ]);
 
 const COMPILATION_RE =
-  /(?:^| )(?:best of|greatest hits|the very best|hits|collection|anthology|essentials?|gold|now thats what i call|various)(?= |$)/u;
+  /(?:^| )(?:best of|greatest hits|the very best|hits|collection|anthology|essentials?|gold|now thats what i call|various|\d+ originals|original album (?:classics|series)|\d+ in \d+|box set)(?= |$)/u;
 
 export type Details = Record<string, number | string>;
 

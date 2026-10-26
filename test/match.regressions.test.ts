@@ -55,3 +55,13 @@ describe('search queries', () => {
     expect(buildQuery(track({ title: 'Blinding Lights', artist: 'The Weeknd' })).credits).toBeUndefined();
   });
 });
+
+describe('compilation bundles', () => {
+  it('prefers the original album over a multi-album bundle with the same recording', () => {
+    // Live run: Apple returned the same 1987 recording on "3 Originals" first, tied with the original album.
+    const source = track({ title: 'Never Gonna Give You Up', artist: 'Rick Astley' });
+    const bundle = track({ title: 'Never Gonna Give You Up', artist: 'Rick Astley', album: '3 Originals', durationMs: 214720 });
+    const original = track({ title: 'Never Gonna Give You Up', artist: 'Rick Astley', album: 'Whenever You Need Somebody', durationMs: 213573 });
+    expect(pickBestTrack(source, [bundle, original]).accepted?.item).toBe(original);
+  });
+});

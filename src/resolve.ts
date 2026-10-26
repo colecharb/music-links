@@ -43,6 +43,8 @@ export interface ServiceDetail {
   score?: number;
   /** Best candidate that was considered but not accepted. */
   rejected?: { item: ItemMeta; score: number; reason?: string };
+  /** The ISRC/UPC an exact match was found by. */
+  identifier?: string;
   note?: string;
   ms?: number;
 }
@@ -204,7 +206,7 @@ async function matchAppleTrack(
   const byIsrc = async (isrc: string, strict: boolean) => {
     const hits = await appleTracksByIsrc(ctx, isrc);
     const pick = pickBestById(source, hits, { strict });
-    return pick.accepted ? matched('exact', 'isrc', pick.accepted.item, pick.accepted.score) : null;
+    return pick.accepted ? { ...matched('exact', 'isrc', pick.accepted.item, pick.accepted.score), identifier: isrc } : null;
   };
 
   if (source.isrc) {
@@ -240,7 +242,7 @@ async function matchAppleAlbum(
   const byUpc = async (upc: string, strict: boolean) => {
     const hits = await appleAlbumsByUpc(ctx, upc);
     const pick = pickBestById(source, hits, { strict });
-    return pick.accepted ? matched('exact', 'upc', pick.accepted.item, pick.accepted.score) : null;
+    return pick.accepted ? { ...matched('exact', 'upc', pick.accepted.item, pick.accepted.score), identifier: upc } : null;
   };
 
   if (source.upc) {
@@ -394,12 +396,10 @@ function buildEntry(
     source.url.includes('youtube.com') || !source.art ? (matchedItems.find((i) => i.art)?.art ?? source.art) : source.art;
 
   const year = source.releaseDate ? Number(source.releaseDate.slice(0, 4)) : NaN;
+  // The source's own identifier, else one confirmed by an exact identifier match on another service.
   const identifier = (k: 'isrc' | 'upc') =>
     (source as Partial<Record<'isrc' | 'upc', string>>)[k] ??
-    MATCHED_SERVICES.map((s) => details[s])
-      .filter((d) => d.match === 'exact' && d.item)
-      .map((d) => (d.item as Partial<Record<'isrc' | 'upc', string>>)[k])
-      .find(Boolean);
+    MATCHED_SERVICES.map((s) => details[s]).find((d) => d.match === 'exact' && d.via === k)?.identifier;
 
   return {
     kind: source.kind,
