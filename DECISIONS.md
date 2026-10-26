@@ -96,17 +96,34 @@ Each entry: the decision, why, and the alternative considered.
     match (Spotify/YouTube sources), the Apple hit must pass the full fuzzy rules too. The Deezer item
     itself stays `fuzzy`. *Alternative:* never call anything from a Spotify source `exact`, which would
     hide the extra certainty an ISRC/UPC agreement between two catalogs gives.
-24. **Edit vs extended vs original** labels are hard version markers, except when both durations are known
-    and agree: platforms label the same single edit inconsistently, and the duration settles it. Live,
-    remix, acoustic, instrumental, demo, sped up, slowed, karaoke and re-recorded ("Taylor's Version")
-    never get that exception. Qualifiers must agree too: a "Tiësto Remix" never matches a "David Guetta
-    Remix", and two live recordings on different (non-compilation) live albums are different concerts.
+24. **Edit vs extended vs original** labels are hard version markers, except on tracks when both
+    durations are known and agree: platforms label the same single edit inconsistently, and the duration
+    settles it. Albums get no such exception (a single has one track either way, so equal track counts
+    prove nothing). Live, remix, acoustic, instrumental, demo, sped up, slowed, karaoke and re-recorded
+    ("Taylor's Version") never get it. Qualifiers must agree too: a "Tiësto Remix" never matches a
+    "David Guetta Remix", and two live recordings on different (non-compilation) live albums are
+    different concerts. Tracks also inherit every hard tag of their album title ("Instrumentals",
+    "(Remixes)", "(Acoustic)"); those album-derived tags reject search hits but not an ISRC from the
+    source platform (an album label is an inference, the ISRC identifies the recording), and a title
+    that says it is the original ("Original Mix", "Album Version") doesn't inherit them.
 25. **Unclassified "<words> version" on one side only** ("Piano Version", "Spanish Version") rejects a
     search hit even when durations agree ("Faded" vs "Faded (Piano Version)" are 2.5 s apart).
-26. **No duration (YouTube sources):** title similarity needs 0.9 instead of 0.8, near-miss spellings don't
-    count ("Animals"/"Animal"), and an unexplained bracket group on one side only caps similarity at 0.85.
-    Found live: Deezer's only Rick Astley candidate was the 2023 "(Pianoforte)" re-recording; without
-    this rule it was presented as a direct link.
+26. **Unexplained bracket groups.** A trailing group that one side has and the other doesn't (or a
+    different group on each side, or an unrecognized " - " suffix) caps title similarity at 0.75, below
+    every threshold, with or without a duration: re-recordings ("(Pianoforte)", "(Reimagined)") are made
+    to the original's length, so a matching duration explains nothing. Found live: Deezer's only Rick
+    Astley candidate was the 2023 "(Pianoforte)" re-recording. Excused: groups in another script than
+    the title (translations/romanizations: "Gangnam Style (강남스타일)"), and, when durations agree,
+    groups that only name credited artists ("Oran Marseille (Khaled - I Am)"). Soundtrack attributions,
+    years, bonus-track, cast-album and video labels are ignorable. Ignorable words never hide the rest of
+    a descriptor ("(Original Piano Version)" is a piano version).
+26a. **No duration (YouTube sources):** title similarity needs 0.9 instead of 0.8, near-miss spellings
+    don't count ("Animals"/"Animal"), and live/remix versions need named, compatible qualifiers on both
+    sides (from the title, or the candidate's album title): "(Live)" alone can't say which concert, so it
+    gets a search link. A year alone matches only a year alone. Featured artists stand in for a missing
+    remixer name ("Despacito (feat. Justin Bieber) [Remix]").
+26b. **±3 s is a hard limit on the reported durations.** Whole-second precision (Deezer, Spotify meta tags)
+    only softens the score curve, never the limit.
 27. **Featured artists** count as credits (Apple puts them in titles, Spotify in artist lists). A featured
     artist that the other side doesn't credit anywhere costs 0.15: usually a different version.
 28. **Numbers and distinct parts cap title similarity** ("Pt. 1"/"Pt. 2", "Greatest Hits II"/"III",
@@ -114,14 +131,26 @@ Each entry: the decision, why, and the alternative considered.
 29. **Tie-breaks** (within 0.02): non-compilation (incl. bundles like "3 Originals", "Original Album
     Classics") → explicit agrees with source → same album title → earlier release → API order.
 30. **Transliteration:** consonant skeletons for Latin transliterations ("Ouelli El Darek" / "Weli L
-    Darek"), and Cyrillic/Greek → Latin ("Кино" / "Kino"). Capped below the no-duration threshold.
-    CJK/Arabic/Hangul have no transliteration (known gap).
+    Darek") count only when the album titles agree, because unrelated English words share skeletons too
+    ("Stronger"/"Strange"). Cyrillic/Greek → Latin ("Кино" / "Kino") always. CJK/Arabic/Hangul have no
+    transliteration (known gap).
+30a. **Artist prefixes:** only "The" and raï honorifics (Cheb, Cheba, Chaba, Cheikh, Cheikha) are ignored.
+    "DJ"/"MC" are part of the name: DJ Khaled and Khaled are two artists.
 31. **Search queries** use the title without featured clauses and non-version suffixes, plus hard-version
     words ("live", "remix") and remixer names; venue strings are left out (formatted differently
     everywhere). Apple gets one second-chance search (title + last credit, or title alone) only when
     the first finds nothing acceptable, to spare the iTunes rate limit.
 
 ## Resolution, data and routes
+
+31a. **Identifier lookups fail soft.** A failed ISRC/UPC lookup (timeout, 5xx, quota) counts as no hit: the
+    metadata search, which starts in parallel with the lookup, still decides, and the lookup error goes
+    into the misses note. Only a failing search makes the service an `error`.
+31b. **Unplayable catalog copies are never direct links.** Deezer ISRC hits with an empty
+    `available_countries` (withdrawn duplicates; verified live for Queen's 2011 remasters) are misses, so
+    search finds the playable copy. `readable: false` alone is not used: it reflects the worker's egress
+    country. Apple: iTunes `isStreamable: false` and MusicKit items without `playParams` are dropped from
+    searches and identifier lookups.
 
 32. **Misses are logged for Apple and Deezer only**, the services where matching is attempted. Spotify,
     YouTube Music and Amazon are search links by design; logging them on every resolve would bury the
@@ -139,8 +168,15 @@ Each entry: the decision, why, and the alternative considered.
 37. **Art:** the source's art, except YouTube sources, which use square cover art from a match when one
     exists instead of a letterboxed 480×360 video thumbnail.
 
+34a. **The link's creator always sees the share page.** `/?u=` redirects to `/:p/:k/:id?stay`, so a saved
+    preferred service doesn't bounce the creator away from the copy button. The canonical, copied and
+    previewed URLs carry no `?stay`. The prefix trick keeps its plain 301, since prefixed URLs are also
+    shared with recipients.
+34b. **Private or non-embeddable YouTube videos** (oEmbed 401/403) are a 404 page, not "try again".
+
 ## Page
 
 38. **The copy button is hidden without JS**; its script reads the URL from an escaped `data-url`
     attribute, so nothing is ever interpolated into script context. Go links are relative.
 39. **The album line is omitted when it equals the track title** (singles), on the page and in previews.
+40. **`dir="auto"`** on title, artist and album so right-to-left titles keep their order.
