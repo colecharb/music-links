@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/lookup?upc=602567759461&country=us",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":1,\n \"results\": [\n{\"wrapperType\":\"collection\", \"collectionType\":\"Album\", \"artistId\":384924, \"collectionId\":1400380382, \"amgArtistId\":2032685, \"artistName\":\"Khaled\", \"collectionName\":\"Best Of\", \"collectionCensoredName\":\"Best Of\", \"artistViewUrl\":\"https://music.apple.com/us/artist/khaled/384924?uo=4\", \"collectionViewUrl\":\"https://music.apple.com/us/album/best-of/1400380382?uo=4\", \"artworkUrl60\":\"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/46/58/84/4658840b-982e-8456-04f0-1df278920774/00602567759461.rgb.jpg/60x60bb.jpg\", \"artworkUrl100\":\"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/46/58/84/4658840b-982e-8456-04f0-1df278920774/00602567759461.rgb.jpg/100x100bb.jpg\", \"collectionPrice\":9.99, \"collectionExplicitness\":\"notExplicit\", \"trackCount\":15, \"copyright\":\"This Compilation ℗ 2007 Capitol Music France\", \"country\":\"USA\", \"currency\":\"USD\", \"releaseDate\":\"2007-01-01T08:00:00Z\", \"primaryGenreName\":\"North African\"}]\n}\n\n\n"
+ }
+}

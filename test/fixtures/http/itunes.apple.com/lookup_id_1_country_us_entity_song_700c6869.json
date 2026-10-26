@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/lookup?id=1&country=us&entity=song",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":0,\n \"results\": []\n}\n\n\n"
+ }
+}
