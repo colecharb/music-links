@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://api.deezer.com/search/track?q=artist%3A%22The%20Weeknd%22%20track%3A%22blinding%20lights%22&limit=15",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": "{\"data\":[],\"total\":0}"
+ }
+}

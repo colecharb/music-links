@@ -654,6 +654,8 @@ export function skeleton(s: string): string {
 
 /** Penalty for comparing titles with their unrecognized trailing groups removed. */
 export const CORE_PENALTY = 0.05;
+/** Similarity cap for an unexplained one-sided bracket group when no duration can confirm the match. */
+export const UNEXPLAINED_GROUP_CAP = 0.85;
 /** Transliteration matches never count as more than this. */
 export const SKELETON_CAP = 0.85;
 /** Shorter skeletons collide too easily ("Lose" / "Loose" / "Lies"). */
@@ -767,6 +769,12 @@ export interface TitleSimilarityOptions {
    * confirm the match.
    */
   fuzzyChars?: boolean;
+  /**
+   * Default true. false: an unrecognized bracket group on one side only ("Never Gonna Give You Up" /
+   * "... (Pianoforte)") caps the similarity at UNEXPLAINED_GROUP_CAP. That difference is unexplained, so
+   * only a matching duration can show it's the same recording.
+   */
+  cores?: boolean;
 }
 
 /** Similarity of two parsed titles in 0..1. Version tags are not considered here. */
@@ -775,9 +783,11 @@ export function titleSimilarity(a: ParsedTitle, b: ParsedTitle, opts: TitleSimil
   const ab = comparable(a.base);
   const bb = comparable(b.base);
   let best = pairSimilarity(ab, bb, fuzzyChars);
-  if (coresComparable(a, b)) {
+  const cores = opts.cores ?? true;
+  if (cores && coresComparable(a, b)) {
     best = Math.max(best, pairSimilarity(comparable(a.core), comparable(b.core), fuzzyChars) - CORE_PENALTY);
   }
+  const unexplained = !cores && extraGroups(a) !== extraGroups(b);
   const ta = transliterate(ab);
   const tb = transliterate(bb);
   if (ta !== ab || tb !== bb) best = Math.max(best, pairSimilarity(ta, tb, fuzzyChars) - TRANSLIT_PENALTY);
@@ -788,5 +798,6 @@ export function titleSimilarity(a: ParsedTitle, b: ParsedTitle, opts: TitleSimil
   }
   if (numbersOf(ab) !== numbersOf(bb)) best = Math.min(best, NUMBER_MISMATCH_CAP);
   if (DISTINCT_PART_RE.test(differingWords(ab, bb).join(' '))) best = Math.min(best, DISTINCT_PART_CAP);
+  if (unexplained) best = Math.min(best, UNEXPLAINED_GROUP_CAP);
   return Math.max(0, Math.min(1, best));
 }

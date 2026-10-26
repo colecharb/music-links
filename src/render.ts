@@ -1,8 +1,8 @@
 // Server-rendered pages. Each page is one small self-contained response: inline CSS, and on the
 // share page one tiny inline script. Every interpolation goes through hono/html, which escapes it.
 import { html, raw } from 'hono/html';
-import { CODE_BY_KIND, SERVICE_NAMES, SERVICES } from './types';
-import type { ResolvedEntry, Service, ServiceLink, SourceRef } from './types';
+import { CODE_BY_KIND, isDirect, SERVICE_NAMES, SERVICES } from './types';
+import type { ResolvedEntry, Service, SourceRef } from './types';
 
 type Html = ReturnType<typeof html>;
 
@@ -59,10 +59,6 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #4c8b
 
 // The copy button is hidden until this runs, so without JS there is no dead control.
 const COPY_SCRIPT = `(function(){var b=document.getElementById('copy');if(!b)return;var t=b.textContent,u=b.getAttribute('data-url');b.hidden=false;b.onclick=function(){function done(){b.textContent='Copied';setTimeout(function(){b.textContent=t},${COPIED_LABEL_MS})}function ask(){prompt('Copy this link:',u)}if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(u).then(done,ask);else ask()}})()`;
-
-export function isDirect(link: ServiceLink): boolean {
-  return link.match === 'exact' || link.match === 'fuzzy';
-}
 
 /** The share page's button target: the go route records the visitor's choice, then redirects. */
 export function goPath(service: Service, ref: SourceRef): string {

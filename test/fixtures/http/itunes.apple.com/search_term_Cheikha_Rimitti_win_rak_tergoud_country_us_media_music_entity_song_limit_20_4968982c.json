@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/search?term=Cheikha+Rimitti+win+rak+tergoud&country=us&media=music&entity=song&limit=20",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":1,\n \"results\": [\n{\"wrapperType\":\"track\", \"kind\":\"song\", \"artistId\":21498417, \"collectionId\":975980396, \"trackId\":975981523, \"artistName\":\"Cheikha Rimitti\", \"collectionName\":\"Aux sources du raï (Musiques et chants d'Algérie)\", \"trackName\":\"Win rak tergoud ?\", \"collectionCensoredName\":\"Aux sources du raï (Musiques et chants d'Algérie)\", \"trackCensoredName\":\"Win rak tergoud ?\", \"artistViewUrl\":\"https://music.apple.com/us/artist/cheikha-rimitti/21498417?uo=4\", \"collectionViewUrl\":\"https://music.apple.com/us/album/win-rak-tergoud/975980396?i=975981523&uo=4\", \"trackViewUrl\":\"https://music.apple.com/us/album/win-rak-tergoud/975980396?i=975981523&uo=4\", \n\"previewUrl\":\"https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/b4/8a/84/b48a8457-37d3-61d3-4e00-14207696ed90/mzaf_2647604617665410753.plus.aac.p.m4a\", \"artworkUrl30\":\"https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/6b/a3/5c/6ba35c8c-a823-1d1b-60a1-5a132f2eb7d1/3700551773930_cover.jpg/30x30bb.jpg\", \"artworkUrl60\":\"https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/6b/a3/5c/6ba35c8c-a823-1d1b-60a1-5a132f2eb7d1/3700551773930_cover.jpg/60x60bb.jpg\", \"artworkUrl100\":\"https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/6b/a3/5c/6ba35c8c-a823-1d1b-60a1-5a132f2eb7d1/3700551773930_cover.jpg/100x100bb.jpg\", \"collectionPrice\":9.99, \"trackPrice\":0.99, \"releaseDate\":\"1994-01-01T12:00:00Z\", \"collectionExplicitness\":\"notExplicit\", \"trackExplicitness\":\"notExplicit\", \"discCount\":1, \"discNumber\":1, \"trackCount\":13, \"trackNumber\":11, \"trackTimeMillis\":416733, \"country\":\"USA\", \"currency\":\"USD\", \"primaryGenreName\":\"North African\", \"isStreamable\":true}]\n}\n\n\n"
+ }
+}

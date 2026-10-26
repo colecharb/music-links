@@ -50,6 +50,11 @@ export interface ServiceLink {
   match: MatchType;
 }
 
+/** A link that opens the item itself (as opposed to a search). */
+export function isDirect(link: ServiceLink): boolean {
+  return link.match === 'exact' || link.match === 'fuzzy';
+}
+
 export type AlbumType = 'album' | 'single' | 'ep' | 'compilation';
 
 /** Metadata common to tracks and albums, normalized from any platform. */
@@ -100,6 +105,8 @@ export interface SearchQuery {
   artist: string;
   /** Album title, tracks only. */
   album?: string;
+  /** Other credited artists (secondary and featured), in credit order. */
+  credits?: string[];
 }
 
 /** Resolved-links cache value (KV), keyed by `sp:t:<id>` etc. */

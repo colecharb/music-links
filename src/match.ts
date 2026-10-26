@@ -362,8 +362,9 @@ function evaluateTrack(src: TrackMeta, cand: TrackMeta): TrackEval {
 
   const artist = artistMatch(withFeatured(src, st), withFeatured(cand, ct));
   const duration = compareDurations(src, cand);
-  // Without a duration, near-miss spellings ("Animals" / "Animal") are not evidence of the same song.
-  const title = titleSimilarity(st, ct, { fuzzyChars: duration.known });
+  // Without a duration, near-miss spellings ("Animals" / "Animal") and unexplained bracket groups
+  // ("(Pianoforte)") are not evidence of the same song.
+  const title = titleSimilarity(st, ct, { fuzzyChars: duration.known, cores: duration.known });
   const titleMin = duration.known ? TITLE_MIN : TITLE_MIN_NO_DURATION;
   const albumSim = sa && ca ? titleSimilarity(sa, ca) : ALBUM_SIM_UNKNOWN;
 

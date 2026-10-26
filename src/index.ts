@@ -7,7 +7,7 @@ import { resolveRef, type ResolveResult } from './resolve';
 import { getAppleAuth } from './sources/apple';
 import { logMisses, readEntry, writeEntry } from './store';
 import type { AppEnv, ResolvedEntry, Service, SourceRef } from './types';
-import { SERVICE_NAMES, SERVICES } from './types';
+import { isDirect, SERVICE_NAMES, SERVICES } from './types';
 
 export interface AppDeps {
   /** Upstream fetch; tests inject recorded fixtures. */
@@ -160,7 +160,7 @@ export function createApp(deps: AppDeps = {}) {
     c.header('vary', 'Cookie');
     if (pref && SERVICES.includes(pref) && !url.searchParams.has('stay')) {
       const link = entry.links[pref];
-      if (link.match === 'exact' || link.match === 'fuzzy') {
+      if (isDirect(link)) {
         c.header('cache-control', 'private, no-store');
         return c.redirect(link.url, 302);
       }

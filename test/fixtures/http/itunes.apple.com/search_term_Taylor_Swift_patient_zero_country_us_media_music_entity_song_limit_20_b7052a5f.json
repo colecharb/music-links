@@ -1,0 +1,11 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/search?term=Taylor+Swift+patient+zero&country=us&media=music&entity=song&limit=20",
+  "method": "GET"
+ },
+ "response": {
+  "status": 403,
+  "headers": {},
+  "body": ""
+ }
+}

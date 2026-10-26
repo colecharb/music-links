@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://api.deezer.com/search/track?q=Nirvana%20where%20did%20you%20sleep%20last%20night%20live%20acoustic&limit=15",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": "{\"data\":[{\"id\":1105746,\"readable\":true,\"title\":\"Where Did You Sleep Last Night (Live)\",\"title_short\":\"Where Did You Sleep Last Night\",\"title_version\":\"(Live)\",\"isrc\":\"USGF19972714\",\"link\":\"https:\\/\\/www.deezer.com\\/track\\/1105746\",\"duration\":307,\"rank\":742912,\"explicit_lyrics\":false,\"explicit_content_lyrics\":0,\"explicit_content_cover\":0,\"preview\":\"https:\\/\\/cdnt-preview.dzcdn.net\\/api\\/1\\/1\\/4\\/b\\/5\\/0\\/4b53adb817184366ddff1190f7792663.mp3?hdnea=exp=1793042779~acl=\\/api\\/1\\/1\\/4\\/b\\/5\\/0\\/4b53adb817184366ddff1190f7792663.mp3*~data=user_id=0,application_id=42~hmac=7f61d71b099c8a6642b53129bcb2153c46c6bbc0fac5c141ff66237b2b90de63\",\"md5_image\":\"fe1082c5ef54876802146897e76b592e\",\"artist\":{\"id\":415,\"name\":\"Nirvana\",\"link\":\"https:\\/\\/www.deezer.com\\/artist\\/415\",\"picture\":\"https:\\/\\/api.deezer.com\\/artist\\/415\\/image\",\"picture_small\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/artist\\/3ec5542ff520ee74e2befdaba32ef2ef\\/56x56-000000-80-0-0.jpg\",\"picture_medium\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/artist\\/3ec5542ff520ee74e2befdaba32ef2ef\\/250x250-000000-80-0-0.jpg\",\"picture_big\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/artist\\/3ec5542ff520ee74e2befdaba32ef2ef\\/500x500-000000-80-0-0.jpg\",\"picture_xl\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/artist\\/3ec5542ff520ee74e2befdaba32ef2ef\\/1000x1000-000000-80-0-0.jpg\",\"tracklist\":\"https:\\/\\/api.deezer.com\\/artist\\/415\\/top?limit=50\",\"type\":\"artist\"},\"album\":{\"id\":119282,\"title\":\"MTV Unplugged In New York\",\"cover\":\"https:\\/\\/api.deezer.com\\/album\\/119282\\/image\",\"cover_small\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/cover\\/fe1082c5ef54876802146897e76b592e\\/56x56-000000-80-0-0.jpg\",\"cover_medium\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/cover\\/fe1082c5ef54876802146897e76b592e\\/250x250-000000-80-0-0.jpg\",\"cover_big\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/cover\\/fe1082c5ef54876802146897e76b592e\\/500x500-000000-80-0-0.jpg\",\"cover_xl\":\"https:\\/\\/cdn-images.dzcdn.net\\/images\\/cover\\/fe1082c5ef54876802146897e76b592e\\/1000x1000-000000-80-0-0.jpg\",\"md5_image\":\"fe1082c5ef54876802146897e76b592e\",\"tracklist\":\"https:\\/\\/api.deezer.com\\/album\\/119282\\/tracks\",\"type\":\"album\"},\"type\":\"track\"}],\"total\":1}"
+ }
+}

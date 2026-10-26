@@ -29,7 +29,8 @@ const outIdx = args.indexOf('--out');
 const outFile = outIdx >= 0 ? args[outIdx + 1] : undefined;
 const only = args.filter((a) => /^https?:\/\//.test(a));
 const links: TestLink[] = only.length ? only.map((url) => ({ url, why: 'ad hoc' })) : TEST_LINKS;
-const DELAY_MS = Number(process.env.SMOKE_DELAY_MS ?? 4000);
+// iTunes allows ~20 requests/minute and a link can need up to 3 Apple calls.
+const DELAY_MS = Number(process.env.SMOKE_DELAY_MS ?? 8000);
 const PORT = Number(process.env.SMOKE_PORT ?? 8788);
 const STATE = '.wrangler/smoke-state';
 

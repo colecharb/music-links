@@ -23,7 +23,7 @@ import { FIXTURES, fixtureCtx } from './helpers/fixtures';
 const API = 'https://api.deezer.com';
 const cover = (hash: string) => `https://cdn-images.dzcdn.net/images/cover/${hash}/1000x1000-000000-80-0-0.jpg`;
 
-const KHALED_ADVANCED = `${API}/search/track?q=artist%3A%22Khaled%22%20track%3A%22Ouelli%20El%20Darek%22&limit=15`;
+const KHALED_TITLE = `${API}/search/track?q=Ouelli%20El%20Darek&limit=15`;
 const KHALED_PLAIN = `${API}/search/track?q=Khaled%20Ouelli%20El%20Darek&limit=15`;
 const KHALED_QUERY: SearchQuery = { kind: 'track', title: 'Ouelli El Darek', artist: 'Khaled' };
 
@@ -186,7 +186,7 @@ describe('URL builders', () => {
 
   it.each([
     ['track', 'Khaled Ouelli El Darek', 15, KHALED_PLAIN],
-    ['track', 'artist:"Khaled" track:"Ouelli El Darek"', 15, KHALED_ADVANCED],
+    ['track', 'Ouelli El Darek', 15, KHALED_TITLE],
     ['album', 'Daft Punk Discovery', 15, `${API}/search/album?q=Daft%20Punk%20Discovery&limit=15`],
     ['track', 'Rock & Roll', 15, `${API}/search/track?q=Rock%20%26%20Roll&limit=15`],
     ['track', '#1 Crush a+b c/d e=f?', 15, `${API}/search/track?q=%231%20Crush%20a%2Bb%20c%2Fd%20e%3Df%3F&limit=15`],
@@ -204,15 +204,16 @@ describe('URL builders', () => {
 
 describe('deezerSearchQueries', () => {
   it.each<[string, SearchQuery, string[]]>([
-    ['track', KHALED_QUERY, ['artist:"Khaled" track:"Ouelli El Darek"', 'Khaled Ouelli El Darek']],
-    ['album', { kind: 'album', title: 'Discovery', artist: 'Daft Punk' }, ['artist:"Daft Punk" album:"Discovery"', 'Daft Punk Discovery']],
-    ['quotes escaped in advanced only', { kind: 'track', title: '"Heroes"', artist: 'David Bowie' }, ['artist:"David Bowie" track:"\\"Heroes\\""', 'David Bowie "Heroes"']],
-    ['backslash escaped', { kind: 'track', title: 'a\\b', artist: 'c"d' }, ['artist:"c\\"d" track:"a\\\\b"', 'c"d a\\b']],
-    ['& and non-Latin kept verbatim', { kind: 'track', title: 'Rock & Roll', artist: '방탄소년단' }, ['artist:"방탄소년단" track:"Rock & Roll"', '방탄소년단 Rock & Roll']],
-    ['album field is not used', { kind: 'track', title: 'One More Time', artist: 'Daft Punk', album: 'Discovery' }, ['artist:"Daft Punk" track:"One More Time"', 'Daft Punk One More Time']],
-    ['trimmed', { kind: 'track', title: '  Didi ', artist: ' Khaled  ' }, ['artist:"Khaled" track:"Didi"', 'Khaled Didi']],
-    ['no artist: plain only', { kind: 'track', title: 'Didi', artist: ' ' }, ['Didi']],
-    ['no title: plain only', { kind: 'album', title: '', artist: 'Khaled' }, ['Khaled']],
+    ['track: artist + title, then title alone', KHALED_QUERY, ['Khaled Ouelli El Darek', 'Ouelli El Darek']],
+    ['album', { kind: 'album', title: 'Discovery', artist: 'Daft Punk' }, ['Daft Punk Discovery', 'Discovery']],
+    ['credits: title + last credit', { kind: 'track', title: 'despacito remix', artist: 'Luis Fonsi', credits: ['Daddy Yankee', 'Justin Bieber'] }, ['Luis Fonsi despacito remix', 'despacito remix Justin Bieber']],
+    ['blank credits ignored', { kind: 'track', title: 'Didi', artist: 'Khaled', credits: [' ', ''] }, ['Khaled Didi', 'Didi']],
+    ['quotes and backslashes verbatim', { kind: 'track', title: '"Heroes" a\\b', artist: 'David Bowie' }, ['David Bowie "Heroes" a\\b', '"Heroes" a\\b']],
+    ['& and non-Latin kept verbatim', { kind: 'track', title: 'Rock & Roll', artist: '방탄소년단' }, ['방탄소년단 Rock & Roll', 'Rock & Roll']],
+    ['album field is not used', { kind: 'track', title: 'One More Time', artist: 'Daft Punk', album: 'Discovery' }, ['Daft Punk One More Time', 'One More Time']],
+    ['trimmed', { kind: 'track', title: '  Didi ', artist: ' Khaled  ' }, ['Khaled Didi', 'Didi']],
+    ['no artist: one query', { kind: 'track', title: 'Didi', artist: ' ' }, ['Didi']],
+    ['no title: one query', { kind: 'album', title: '', artist: 'Khaled' }, ['Khaled']],
     ['nothing', { kind: 'track', title: ' ', artist: '' }, []],
   ])('%s', (_label, q, expected) => {
     expect(deezerSearchQueries(q)).toEqual(expected);
@@ -362,21 +363,20 @@ describe('deezerAlbumByUpc', () => {
 });
 
 describe('searchDeezer', () => {
-  it('advanced search finds nothing, plain search finds both versions (recorded)', async () => {
+  it('artist + title query first, then title alone (recorded)', async () => {
     const calls: string[] = [];
     const items = await searchDeezer(fixtureCtx({ calls }), KHALED_QUERY);
-    expect(calls).toEqual([KHALED_ADVANCED, KHALED_PLAIN]);
-    expect(items).toStrictEqual([SEARCH_OUELLI, SEARCH_OUELLI_LIVE]);
+    expect(calls).toEqual([KHALED_PLAIN, KHALED_TITLE]);
+    expect(items.slice(0, 2)).toStrictEqual([SEARCH_OUELLI, SEARCH_OUELLI_LIVE]);
+    expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
+    expect(items.length).toBeGreaterThan(2);
   });
 
   it('album search (recorded)', async () => {
     const calls: string[] = [];
     const items = await searchDeezer(fixtureCtx({ calls }), { kind: 'album', title: 'Discovery', artist: 'Daft Punk' });
-    expect(calls).toEqual([
-      `${API}/search/album?q=artist%3A%22Daft%20Punk%22%20album%3A%22Discovery%22&limit=15`,
-      `${API}/search/album?q=Daft%20Punk%20Discovery&limit=15`,
-    ]);
-    expect(items).toStrictEqual<AlbumMeta[]>([
+    expect(calls).toEqual([`${API}/search/album?q=Daft%20Punk%20Discovery&limit=15`, `${API}/search/album?q=Discovery&limit=15`]);
+    expect(items.slice(0, 2)).toStrictEqual<AlbumMeta[]>([
       {
         kind: 'album',
         id: '302127',
@@ -404,14 +404,14 @@ describe('searchDeezer', () => {
     ]);
   });
 
-  it('merges advanced results first and drops duplicates', async () => {
+  it('merges the first query\'s results first and drops duplicates', async () => {
     const plain = recorded(KHALED_PLAIN) as { data: Record<string, unknown>[] };
     const [best, live] = plain.data;
     const extraHit = { ...best, id: 1111, title: 'Ouelli El Darek (Remix)', title_version: '(Remix)' };
     const ctx = fixtureCtx({
       extra: [
-        fixture(KHALED_ADVANCED, { data: [live, best], total: 2 }),
-        fixture(KHALED_PLAIN, { data: [best, extraHit, live], total: 3 }),
+        fixture(KHALED_PLAIN, { data: [live, best], total: 2 }),
+        fixture(KHALED_TITLE, { data: [best, extraHit, live], total: 3 }),
       ],
     });
     const items = await searchDeezer(ctx, KHALED_QUERY);
@@ -422,40 +422,39 @@ describe('searchDeezer', () => {
   it('limit applies to each query; the merged list can be longer', async () => {
     const plain = recorded(KHALED_PLAIN) as { data: Record<string, unknown>[] };
     const [best, live] = plain.data;
-    const adv = `${API}/search/track?q=artist%3A%22Khaled%22%20track%3A%22Ouelli%20El%20Darek%22&limit=1`;
     const pl = `${API}/search/track?q=Khaled%20Ouelli%20El%20Darek&limit=1`;
+    const t = `${API}/search/track?q=Ouelli%20El%20Darek&limit=1`;
     const calls: string[] = [];
-    const ctx = fixtureCtx({ calls, extra: [fixture(adv, { data: [live] }), fixture(pl, { data: [best] })] });
-    expect((await searchDeezer(ctx, KHALED_QUERY, 1)).map((i) => i.id)).toEqual(['2298124', '515038112']);
-    expect(calls).toEqual([adv, pl]);
+    const ctx = fixtureCtx({ calls, extra: [fixture(pl, { data: [best] }), fixture(t, { data: [live] })] });
+    expect((await searchDeezer(ctx, KHALED_QUERY, 1)).map((i) => i.id)).toEqual(['515038112', '2298124']);
+    expect(calls).toEqual([pl, t]);
   });
 
   it('encodes quotes, & and non-Latin text', async () => {
-    const adv = `${API}/search/track?q=artist%3A%22%EB%B0%A9%ED%83%84%EC%86%8C%EB%85%84%EB%8B%A8%22%20track%3A%22Rock%20%26%20Roll%20%5C%22Live%5C%22%22&limit=15`;
     const pl = `${API}/search/track?q=%EB%B0%A9%ED%83%84%EC%86%8C%EB%85%84%EB%8B%A8%20Rock%20%26%20Roll%20%22Live%22&limit=15`;
+    const t = `${API}/search/track?q=Rock%20%26%20Roll%20%22Live%22&limit=15`;
     const calls: string[] = [];
     const empty = { data: [], total: 0 };
-    const ctx = fixtureCtx({ calls, extra: [fixture(adv, empty), fixture(pl, empty)] });
+    const ctx = fixtureCtx({ calls, extra: [fixture(pl, empty), fixture(t, empty)] });
     expect(await searchDeezer(ctx, { kind: 'track', title: 'Rock & Roll "Live"', artist: '방탄소년단' })).toEqual([]);
-    expect(calls).toEqual([adv, pl]);
-    expect(new URL(adv).searchParams.get('q')).toBe('artist:"방탄소년단" track:"Rock & Roll \\"Live\\""');
+    expect(calls).toEqual([pl, t]);
     expect(new URL(pl).searchParams.get('q')).toBe('방탄소년단 Rock & Roll "Live"');
   });
 
   it('one failed query still returns the other one', async () => {
-    const ctx = fixtureCtx({ extra: [fixture(KHALED_ADVANCED, QUOTA_ERROR)] });
+    const ctx = fixtureCtx({ extra: [fixture(KHALED_TITLE, QUOTA_ERROR)] });
     expect((await searchDeezer(ctx, KHALED_QUERY)).map((i) => i.id)).toEqual(['515038112', '2298124']);
   });
 
   it('both queries failing -> UpstreamError', async () => {
-    const ctx = fixtureCtx({ extra: [fixture(KHALED_ADVANCED, QUOTA_ERROR), fixture(KHALED_PLAIN, QUOTA_ERROR)] });
+    const ctx = fixtureCtx({ extra: [fixture(KHALED_PLAIN, QUOTA_ERROR), fixture(KHALED_TITLE, QUOTA_ERROR)] });
     expect((await rejection(searchDeezer(ctx, KHALED_QUERY))).status).toBe(429);
   });
 
   it('skips malformed entries and tolerates a missing data array', async () => {
     const plain = recorded(KHALED_PLAIN) as { data: Record<string, unknown>[] };
     const ctx = fixtureCtx({
-      extra: [fixture(KHALED_ADVANCED, { total: 0 }), fixture(KHALED_PLAIN, { data: [null, { id: 5 }, { title: 'x' }, plain.data[0]] })],
+      extra: [fixture(KHALED_TITLE, { total: 0 }), fixture(KHALED_PLAIN, { data: [null, { id: 5 }, { title: 'x' }, plain.data[0]] })],
     });
     expect((await searchDeezer(ctx, KHALED_QUERY)).map((i) => i.id)).toEqual(['515038112']);
   });

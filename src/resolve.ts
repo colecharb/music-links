@@ -164,9 +164,12 @@ async function matchDeezerTrack(ctx: UpstreamCtx, source: TrackMeta): Promise<{ 
   const results = (await searchDeezer(ctx, buildQuery(source))).filter(isTrack);
   const pick = pickBestTrack(source, results);
   if (!pick.accepted) return { detail: noMatch('deezer', source, pick.ranked) };
-  // Search results lack the ISRC (needed for Apple) and contributors; fetch the full track.
-  const full = await getDeezerItem(ctx, 'track', pick.accepted.item.id).catch(() => null);
-  const item = full && full.kind === 'track' ? full : pick.accepted.item;
+  // Apple's identifier lookup needs the ISRC; fetch the full track only when the search hit lacks it.
+  let item = pick.accepted.item;
+  if (!item.isrc) {
+    const full = await getDeezerItem(ctx, 'track', item.id).catch(() => null);
+    if (full && full.kind === 'track') item = full;
+  }
   return { detail: matched('fuzzy', 'search', item, pick.accepted.score) };
 }
 
@@ -215,7 +218,13 @@ async function matchAppleTrack(
     }
   }
 
-  const results = (await unwrap(searchP)).filter(isTrack);
+  const query = buildQuery(source);
+  const results = await searchWithRetry(
+    unwrap(searchP),
+    () => searchApple(ctx, altQuery(query)),
+    isTrack,
+    (c) => pickBestTrack(source, c),
+  );
   const pick = pickBestTrack(source, results);
   if (!pick.accepted) return noMatch('apple', source, pick.ranked);
   return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
@@ -245,7 +254,13 @@ async function matchAppleAlbum(
     }
   }
 
-  const results = (await unwrap(searchP)).filter(isAlbum);
+  const query = buildQuery(source);
+  const results = await searchWithRetry(
+    unwrap(searchP),
+    () => searchApple(ctx, altQuery(query)),
+    isAlbum,
+    (c) => pickBestAlbum(source, c),
+  );
   const pick = pickBestAlbum(source, results);
   if (!pick.accepted) return noMatch('apple', source, pick.ranked);
   return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
@@ -257,14 +272,44 @@ async function matchAppleAlbum(
 /** Search text: title without featured artists and non-version suffixes, plus the primary artist. */
 export function buildQuery(item: ItemMeta): SearchQuery {
   const parsed = item.kind === 'track' ? parseTitle(item.title) : parseAlbumTitle(item.title);
-  const words = [...parsed.versions].map((v) => VERSION_QUERY_WORDS[v]).filter((w): w is string => !!w);
+  // Remixer names are spelled consistently across catalogs and the matcher rejects a different remixer,
+  // so they belong in the query. Venue strings ("Live In Del Mar, California/1991") vary too much.
+  const words = [...parsed.versions].flatMap((v) => {
+    const word = VERSION_QUERY_WORDS[v];
+    if (!word) return [];
+    return v === 'remix' ? [...(parsed.qualifiers.remix ?? []), word] : [word];
+  });
   const core = parsed.core || parsed.base || item.title;
+  const artist = item.artists[0] ?? item.artist;
+  const credits = [...new Set([...item.artists.slice(1), ...parsed.featured])].filter(
+    (c) => c.toLowerCase() !== artist.toLowerCase(),
+  );
   return {
     kind: item.kind,
     title: [core, ...words].join(' '),
-    artist: item.artists[0] ?? item.artist,
+    artist,
     album: item.kind === 'track' ? item.album : undefined,
+    credits: credits.length ? credits : undefined,
   };
+}
+
+/** Second-chance Apple search when the first found nothing acceptable: see deezerSearchQueries. */
+function altQuery(q: SearchQuery): SearchQuery {
+  return { ...q, artist: q.credits?.at(-1) ?? '' };
+}
+
+/** Run the first search; if nothing clears the threshold, search once more from another angle. */
+async function searchWithRetry<T extends ItemMeta>(
+  first: Promise<ItemMeta[]>,
+  again: () => Promise<ItemMeta[]>,
+  keep: (item: ItemMeta) => item is T,
+  pick: (cands: T[]) => { accepted: unknown },
+): Promise<T[]> {
+  const results = (await first).filter(keep);
+  if (pick(results).accepted) return results;
+  const more = (await again().catch(() => [] as ItemMeta[])).filter(keep);
+  const seen = new Set(results.map((r) => r.id));
+  return [...results, ...more.filter((m) => !seen.has(m.id))];
 }
 
 function queryText(q: SearchQuery): string {

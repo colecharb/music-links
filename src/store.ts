@@ -1,6 +1,6 @@
 // Resolved-links cache (KV) and the misses log (D1). Storage problems are logged, never thrown:
 // a cache or log failure must not break a page.
-import { SERVICES } from './types';
+import { isDirect, SERVICES } from './types';
 import type { MissRow, ResolvedEntry, ServiceLink } from './types';
 
 export const TTL_COMPLETE_SECONDS = 30 * 24 * 3600;
@@ -26,10 +26,6 @@ export const INSERT_MISS_SQL = `INSERT INTO misses (${MISS_COLUMNS.join(', ')}) 
 
 const MATCH_TYPES: readonly string[] = ['exact', 'fuzzy', 'search'];
 const APPLE_MODES: readonly string[] = ['musickit', 'itunes'];
-
-function isDirect(link: ServiceLink): boolean {
-  return link.match === 'exact' || link.match === 'fuzzy';
-}
 
 /** Long TTL only once both services that commonly lag on new releases have a direct link. */
 export function ttlFor(entry: ResolvedEntry): number {

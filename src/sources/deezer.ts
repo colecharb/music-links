@@ -120,11 +120,10 @@ async function getDeezer(ctx: UpstreamCtx, url: string): Promise<Json | null> {
 // Search
 
 /**
- * Searches with two queries in parallel: the advanced syntax (artist:"…" track:"…") and plain
- * "<artist> <title>". Advanced search is precise when it works, but returns nothing for entries the
- * plain query finds (as of 2026-10 even artist:"Daft Punk" track:"One More Time" returns 0).
- * Results are merged, advanced first, deduplicated by id; `limit` applies per query, so the merged
- * list can hold up to twice as many. One failed query doesn't hide the other's results.
+ * Searches with two plain queries in parallel and merges the results (first query first, deduplicated
+ * by id; `limit` applies per query). One failed query doesn't hide the other's results.
+ * The advanced syntax (artist:"…" track:"…") is not used: as of 2026-10 it returns nothing even for the
+ * documented examples. Recall of plain search is fickle, so the second query takes another angle.
  */
 export async function searchDeezer(ctx: UpstreamCtx, q: SearchQuery, limit: number = DEEZER_SEARCH_LIMIT): Promise<ItemMeta[]> {
   const queries = deezerSearchQueries(q);
@@ -136,20 +135,18 @@ export async function searchDeezer(ctx: UpstreamCtx, q: SearchQuery, limit: numb
   return mergeById(lists);
 }
 
-/** [advanced, plain]; the advanced query only when both artist and title are known. */
+/**
+ * ["<artist> <title>", second]. The second query is "<title> <last other credit>" when there are other
+ * credits (featured artists come last; "despacito remix justin bieber" finds the remix that
+ * "luis fonsi despacito remix" misses), else the title alone (popular versions first, and immune to
+ * artist spellings that differ between catalogs).
+ */
 export function deezerSearchQueries(q: SearchQuery): string[] {
   const title = q.title.trim();
   const artist = q.artist.trim();
-  const queries: string[] = [];
-  if (title && artist) queries.push(`artist:${quoted(artist)} ${q.kind}:${quoted(title)}`);
-  const plain = [artist, title].filter(Boolean).join(' ');
-  if (plain) queries.push(plain);
-  return queries;
-}
-
-/** A double-quoted value for the advanced syntax, with backslashes and quotes escaped. */
-function quoted(value: string): string {
-  return `"${value.replace(/[\\"]/g, '\\$&')}"`;
+  const credit = q.credits?.map((c) => c.trim()).filter(Boolean).at(-1);
+  const queries = [[artist, title], [title, credit]].map((parts) => parts.filter(Boolean).join(' '));
+  return [...new Set(queries.filter(Boolean))];
 }
 
 async function searchOnce(ctx: UpstreamCtx, kind: Kind, query: string, limit: number): Promise<ItemMeta[]> {
