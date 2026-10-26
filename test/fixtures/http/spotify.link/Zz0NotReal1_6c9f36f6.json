@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://spotify.link/Zz0NotReal1",
+  "method": "GET"
+ },
+ "response": {
+  "status": 307,
+  "headers": {
+   "location": "https://open.spotify.com/"
+  },
+  "body": ""
+ }
+}
