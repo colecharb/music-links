@@ -58,7 +58,18 @@ describe('home', () => {
     const u = encodeURIComponent(`https://open.spotify.com/intl-fr/track/${SP_ID}?si=abc`);
     const res = await request(`/?u=${u}`);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(`/sp/t/${SP_ID}`);
+    expect(res.headers.get('location')).toBe(`/sp/t/${SP_ID}?stay`);
+  });
+
+  it('shows the share page to its creator even with a preferred service set', async () => {
+    const u = encodeURIComponent(`https://open.spotify.com/track/${SP_ID}`);
+    const first = await request(`/?u=${u}`, { headers: { cookie: 'pref=apple' } });
+    const res = await request(first.headers.get('location') ?? '', { headers: { cookie: 'pref=apple' } });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // What gets copied and previewed is the canonical URL, without ?stay.
+    expect(html).toContain(`data-url="http://localhost/sp/t/${SP_ID}"`);
+    expect(html).toContain(`<link rel="canonical" href="http://localhost/sp/t/${SP_ID}">`);
   });
 
   it.each(['not a link', 'https://example.com/song/1', 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M'])(
@@ -103,6 +114,7 @@ describe('share page', () => {
     const html = await res.text();
     expect(html).toContain('og:title');
     expect(html).toContain('Ouelli El Darek — Khaled');
+    expect(html).toContain('<h1 dir="auto">Ouelli El Darek</h1>'); // right-to-left titles keep their order
     expect(html).toContain(ENTRY.art);
     expect(html).toContain(`/go/apple/sp/t/${SP_ID}`);
     expect(new TextEncoder().encode(html).length).toBeLessThan(15000);
@@ -142,6 +154,12 @@ describe('share page', () => {
     const res = await request('/sp/t/0000000000000000000000', {}, fetchFn);
     expect(res.status).toBe(404);
     expect(await env.LINKS.get('sp:t:0000000000000000000000')).toBeNull();
+  });
+
+  it.each([401, 403])('treats a private or non-embeddable YouTube video (oEmbed %i) as not found', async (status) => {
+    const fetchFn: FetchFn = async () => new Response('Unauthorized', { status });
+    const res = await request('/yt/t/Pr1vateVid0', {}, fetchFn);
+    expect(res.status).toBe(404);
   });
 
   it('shows a retry page and caches nothing when the source is unreachable', async () => {

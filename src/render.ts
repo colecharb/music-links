@@ -14,7 +14,7 @@ export const MAX_DESCRIPTION_CHARS = 200;
 export const THEME_COLOR_LIGHT = '#ffffff';
 export const THEME_COLOR_DARK = '#121212';
 export const COPIED_LABEL_MS = 1500;
-export const HOME_PLACEHOLDER = 'Paste a Spotify, Apple Music, Deezer or YouTube link';
+export const HOME_PLACEHOLDER = 'Paste a song or album link';
 export const SEP = ' · ';
 export const LISTEN_ON = `Listen on ${SERVICES.map((s) => SERVICE_NAMES[s]).join(', ')}`;
 
@@ -126,9 +126,9 @@ ${art ? html`<meta name="twitter:image" content="${art}">
   const body = html`${art
     ? html`<img class="art" src="${art}" width="${ART_SIZE_PX}" height="${ART_SIZE_PX}" alt="${artAlt}" decoding="async" fetchpriority="high">`
     : html`<div class="art" aria-hidden="true"></div>`}
-<h1>${entry.title}</h1>
-<p class="artist">${entry.artist}</p>
-${album ? html`<p class="album">${album}</p>` : ''}
+<h1 dir="auto">${entry.title}</h1>
+<p class="artist" dir="auto">${entry.artist}</p>
+${album ? html`<p class="album" dir="auto">${album}</p>` : ''}
 <ul>
 ${serviceButtons(entry, ref).map(
   (b) => html`<li><a class="${b.direct ? 'btn' : 'btn alt'}" href="${b.href}" rel="nofollow">${b.label}</a></li>
@@ -147,7 +147,7 @@ export async function renderHomePage(o: { error?: string; value?: string } = {})
 <meta property="og:title" content="${SITE_NAME}">
 <meta property="og:description" content="One link for every music service.">`;
   const body = html`<h1>${SITE_NAME}</h1>
-<p class="mut">One link for every music service.</p>
+<p class="mut">One link for every music service. Works with Spotify, Apple Music, Deezer and YouTube links.</p>
 <form method="get" action="/">
 <input name="u" type="text" inputmode="url" placeholder="${HOME_PLACEHOLDER}" aria-label="Song or album link" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" autofocus required${o.value ? html` value="${o.value}"` : ''}${o.error ? raw(' aria-invalid="true" aria-describedby="err"') : ''}>
 ${o.error ? html`<p id="err" class="err" role="alert">${o.error}</p>

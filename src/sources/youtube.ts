@@ -30,9 +30,11 @@ export function youtubeOEmbedUrl(id: string): string {
 
 export async function getYouTubeItem(ctx: UpstreamCtx, id: string): Promise<TrackMeta> {
   const data = await getJson<OEmbed>(ctx, youtubeOEmbedUrl(id)).catch((err: unknown) => {
-    // oEmbed answers 400 "Bad Request" for ids that don't exist (and 401/403/404 for private,
-    // non-embeddable or removed videos, which keep their status).
-    if (err instanceof UpstreamError && err.status === 400) throw new UpstreamError(`www.youtube.com: no video ${id}`, 404);
+    // oEmbed answers 400 for ids that don't exist, 404 for removed videos and 401/403 for private or
+    // non-embeddable ones. All are permanent: report them as not found rather than as an outage.
+    if (err instanceof UpstreamError && (err.status === 400 || err.status === 401 || err.status === 403)) {
+      throw new UpstreamError(`www.youtube.com: video ${id} unavailable (HTTP ${err.status})`, 404);
+    }
     throw err;
   });
   const rawTitle = typeof data?.title === 'string' ? data.title.trim() : '';
@@ -61,7 +63,7 @@ export const CHANNEL_SUFFIX = /\s*(?:VEVO|Vevo|vevo)$|\s+(?:Official|OFFICIAL|of
 /** Joiners between several artists in an "Artist" string. Only lowercase " x " (uppercase X ends names like "Lil Nas X"). */
 export const ARTIST_JOINERS = /\s*,\s+|\s+&\s+|\s+[x×]\s+|\s+(?:[Ff]eat|FEAT|[Ff]t|FT|[Ff]eaturing|FEATURING)\.?\s+/;
 
-const VIDEO_KIND = String.raw`music\s+video|lyrics?\s+video|video\s*clip|video|audio|visuali[sz]er|lyrics?|m\/?v`;
+const VIDEO_KIND = String.raw`music\s+video|lyrics?\s+video|video\s*clip|video|audio|visuali[sz]er|(?:with\s+)?lyrics?|m\/?v`;
 const QUALITY = String.raw`hd|hq|4k|8k`;
 
 /**

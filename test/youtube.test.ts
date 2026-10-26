@@ -68,18 +68,23 @@ describe('getYouTubeItem (recorded oEmbed)', () => {
     expect((err as UpstreamError).status).toBe(404);
   });
 
-  // oEmbed answers private / non-embeddable / removed videos with a plain-text status line.
+  // oEmbed answers private / non-embeddable / removed videos with a plain-text status line. Those are
+  // permanent, so they surface as 404 (not found page); server errors keep their status (retry page).
   it.each([
-    [401, 'Unauthorized'],
-    [403, 'Forbidden'],
-    [404, 'Not Found'],
-    [500, 'Internal Server Error'],
-  ])('HTTP %i: UpstreamError with that status', async (status, body) => {
+    [401, 'Unauthorized', 404],
+    [403, 'Forbidden', 404],
+    [404, 'Not Found', 404],
+    [500, 'Internal Server Error', 500],
+  ])('HTTP %i: UpstreamError (%s)', async (status, body, expected) => {
     const id = 'xxxxxxxxxxx';
     const ctx = fixtureCtx({ extra: [{ request: { url: youtubeOEmbedUrl(id) }, response: { status, body } }] });
     const err = await getYouTubeItem(ctx, id).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UpstreamError);
-    expect((err as UpstreamError).status).toBe(status);
+    expect((err as UpstreamError).status).toBe(expected);
+  });
+
+  it('treats "(with Lyrics)" as video noise, not a featured artist', () => {
+    expect(parseYouTubeTitle('Artist - Song (with Lyrics)', 'Some Channel')).toMatchObject({ title: 'Song', artist: 'Artist' });
   });
 
   it.each([

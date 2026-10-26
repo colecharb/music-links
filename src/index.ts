@@ -22,6 +22,8 @@ const PREF_MAX_AGE_S = 365 * 24 * 3600;
  *  button click that follows a page view must not trigger a second resolution. */
 const MEMORY_TTL_MS = 5 * 60 * 1000;
 const MEMORY_MAX = 500;
+/** Longer than any resolve can take (a few sequential 2.5 s upstream calls). */
+const INFLIGHT_MAX_MS = 20 * 1000;
 
 const PLATFORM_NAMES: Record<SourceRef['platform'], string> = {
   sp: SERVICE_NAMES.spotify,
@@ -33,7 +35,7 @@ const PLATFORM_NAMES: Record<SourceRef['platform'], string> = {
 export function createApp(deps: AppDeps = {}) {
   const app = new Hono<{ Bindings: AppEnv }>();
   const memory = new Map<string, { entry: ResolvedEntry; at: number }>();
-  const inflight = new Map<string, Promise<ResolveResult>>();
+  const inflight = new Map<string, { p: Promise<ResolveResult>; at: number }>();
 
   async function upstream(c: C): Promise<UpstreamCtx> {
     const country = (c.req.raw as { cf?: { country?: unknown } }).cf?.country;
@@ -50,37 +52,48 @@ export function createApp(deps: AppDeps = {}) {
     memory.set(key, { entry, at: Date.now() });
   }
 
+  function fresh(key: string): ResolvedEntry | undefined {
+    const mem = memory.get(key);
+    return mem && Date.now() - mem.at < MEMORY_TTL_MS ? mem.entry : undefined;
+  }
+
   /** Resolve once per key per isolate at a time; persist the result in the background. */
   async function resolveAndStore(c: C, ref: SourceRef): Promise<ResolveResult> {
     const key = cacheKey(ref);
-    let p = inflight.get(key);
-    if (!p) {
-      p = upstream(c)
-        .then((ctx) => resolveRef(ctx, ref))
-        .finally(() => inflight.delete(key));
-      inflight.set(key, p);
+    const running = inflight.get(key);
+    // A resolve whose request was cancelled could hang; never join one that is older than possible.
+    if (running && Date.now() - running.at < INFLIGHT_MAX_MS) return running.p;
+    const p = upstream(c)
+      .then((ctx) => resolveRef(ctx, ref))
+      .finally(() => {
+        if (inflight.get(key)?.p === p) inflight.delete(key);
+      });
+    inflight.set(key, { p, at: Date.now() });
+    // Keep the shared resolve alive even if the request that started it goes away.
+    background(
+      c,
       p.then(
         (result) => {
           remember(key, result.entry);
-          background(c, writeEntry(c.env.LINKS, key, result.entry));
-          background(c, logMisses(c.env.DB, result.misses));
+          return Promise.all([writeEntry(c.env.LINKS, key, result.entry), logMisses(c.env.DB, result.misses)]);
         },
-        () => {},
-      );
-    }
+        () => undefined, // the requests awaiting p report the failure
+      ),
+    );
     return p;
   }
 
   async function getEntry(c: C, ref: SourceRef): Promise<ResolvedEntry> {
     const key = cacheKey(ref);
-    const mem = memory.get(key);
-    if (mem && Date.now() - mem.at < MEMORY_TTL_MS) return mem.entry;
+    const mem = fresh(key);
+    if (mem) return mem;
     const cached = await readEntry(c.env.LINKS, key);
     if (cached) {
       remember(key, cached);
       return cached;
     }
-    return (await resolveAndStore(c, ref)).entry;
+    // A resolve for this key may have finished while KV was being read; its write may not have landed.
+    return fresh(key) ?? (await resolveAndStore(c, ref)).entry;
   }
 
   async function failurePage(c: C, ref: SourceRef, err: unknown) {
@@ -108,7 +121,9 @@ export function createApp(deps: AppDeps = {}) {
     if (u === undefined) return c.html(await renderHomePage());
     const parsed = await parseInput(await upstream(c), u);
     if (!parsed.ok) return c.html(await renderHomePage({ error: parsed.error, value: u }), 400);
-    return c.redirect(canonicalPath(parsed.ref), 302);
+    // The person creating the link must see the share page (and its copy button), even if they have a
+    // preferred service. The page's canonical and copied URLs carry no ?stay.
+    return c.redirect(`${canonicalPath(parsed.ref)}?stay`, 302);
   });
 
   app.get('/go/:service/:p/:k/:id', async (c) => {

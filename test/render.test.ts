@@ -307,7 +307,7 @@ describe('home page', () => {
       name: 'u',
       type: 'text',
       inputmode: 'url',
-      placeholder: 'Paste a Spotify, Apple Music, Deezer or YouTube link',
+      placeholder: 'Paste a song or album link',
     });
     expect(inputs[0]?.attrs).toHaveProperty('autofocus');
     expect(inputs[0]?.attrs).toHaveProperty('required');
