@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://api.deezer.com/album/upc:999999999999",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "body": "{\"error\":{\"type\":\"DataException\",\"message\":\"no data\",\"code\":800}}"
+ }
+}
