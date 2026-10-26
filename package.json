@@ -1,0 +1,17 @@
+{
+  "name": "music-links",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.ts",
+    "db:migrate:local": "wrangler d1 migrations apply music_links --local"
+  },
+  "dependencies": {
+    "hono": "^4.13.14",
+    "jose": "^6.2.13"
+  }
+}
