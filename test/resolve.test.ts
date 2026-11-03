@@ -32,6 +32,8 @@ const EXPECTED: Record<string, { apple: string; deezer: string }> = {
   'dz:t:4304169612': { apple: 'fuzzy:search:6814997425', deezer: 'exact:source:4304169612' },
   'dz:t:96996588': { apple: 'fuzzy:search:975981523', deezer: 'exact:source:96996588' },
   'dz:a:1002561451': { apple: 'fuzzy:search:6779097512', deezer: 'exact:source:1002561451' },
+  // Same recording as sp:t:0VjIjW4GlUZAMYd2vXMi3b (its Deezer match) and the same Apple search, same pick.
+  'dz:t:908604612': { apple: 'fuzzy:search:1499386265', deezer: 'exact:source:908604612' },
   // No duration from YouTube: Deezer's only candidate is the 2023 "(Pianoforte)" re-recording -> search link.
   'yt:t:dQw4w9WgXcQ': { apple: 'fuzzy:search:1559885421', deezer: 'search:search-url:' },
   'yt:t:lYBUbBu4W08': { apple: 'fuzzy:search:1559885421', deezer: 'search:search-url:' },

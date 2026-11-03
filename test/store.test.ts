@@ -6,6 +6,7 @@ import {
   TTL_PARTIAL_SECONDS,
   logMisses,
   readEntry,
+  readEntryState,
   ttlFor,
   writeEntry,
 } from '../src/store';
@@ -147,8 +148,21 @@ describe('readEntry / writeEntry', () => {
         throw new Error('KV PUT failed: 429');
       },
     } as unknown as KVNamespace;
-    await expect(writeEntry(broken, 'sp:t:x', entry())).resolves.toBeUndefined();
+    await expect(writeEntry(broken, 'sp:t:x', entry())).resolves.toBe(false);
     expect(log).toHaveBeenCalled();
+    await expect(writeEntry(env.LINKS, 'sp:t:written', entry())).resolves.toBe(true);
+  });
+
+  it('readEntryState tells a missing key from a failed read or an unreadable value', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await writeEntry(env.LINKS, 'sp:t:state', entry());
+    expect(await readEntryState(env.LINKS, 'sp:t:state')).toEqual(entry());
+    expect(await readEntryState(env.LINKS, 'sp:t:never-written')).toBe('absent');
+    await env.LINKS.put('sp:t:junk', '{"kind":"podcast"}');
+    expect(await readEntryState(env.LINKS, 'sp:t:junk')).toBe('unreadable');
+    const failing = { get: async () => Promise.reject(new Error('KV GET failed')) } as unknown as KVNamespace;
+    expect(await readEntryState(failing, 'sp:t:state')).toBe('unreadable');
+    expect(await readEntry(failing, 'sp:t:state')).toBeNull();
   });
 });
 

@@ -8,6 +8,10 @@
 //   3. search URL -> 'search'
 // When the source has no identifier (Spotify, YouTube, iTunes-mode Apple), the best Deezer match
 // supplies one; identifier lookups based on it are verified with the full (strict) rules.
+//
+// Spotify (no API) when it isn't the source: the identifiers of the source and of the Deezer/Apple
+// matches are looked up in the learned cross-reference (src/xref.ts), and the Spotify items found are
+// verified with the full fuzzy rules -> 'fuzzy' via 'xref'; otherwise a search URL.
 
 import type { UpstreamCtx } from './http';
 import { UpstreamError } from './http';
@@ -22,6 +26,7 @@ import { getYouTubeItem, youtubeMusicSearchUrl } from './sources/youtube';
 import type {
   AlbumMeta,
   ItemMeta,
+  Kind,
   MatchType,
   MissRow,
   ResolvedEntry,
@@ -31,8 +36,9 @@ import type {
   TrackMeta,
 } from './types';
 import { SERVICE_BY_PLATFORM, SERVICES } from './types';
+import { normalizeIdentifiers, type XrefHit, type XrefReader } from './xref';
 
-export type Via = 'source' | 'isrc' | 'upc' | 'search' | 'search-url';
+export type Via = 'source' | 'isrc' | 'upc' | 'search' | 'search-url' | 'xref';
 
 /** What happened for one service; drives the link, the misses log and the smoke report. */
 export interface ServiceDetail {
@@ -44,7 +50,7 @@ export interface ServiceDetail {
   score?: number;
   /** Best candidate that was considered but not accepted. */
   rejected?: { item: ItemMeta; score: number; reason?: string };
-  /** The ISRC/UPC an exact match was found by. */
+  /** The ISRC/UPC an exact (or Spotify 'xref') match was found by. */
   identifier?: string;
   note?: string;
   ms?: number;
@@ -59,8 +65,18 @@ export interface ResolveResult {
   ms: number;
 }
 
+export interface ResolveOptions {
+  /** Clock, injectable for tests. */
+  now?: () => number;
+  /** Learned ISRC/UPC -> Spotify items. Without it, Spotify is a search link unless it is the source. */
+  xref?: XrefReader;
+}
+
 /** Services whose matching is attempted through an API (the others are search URLs by design). */
 const MATCHED_SERVICES: readonly Service[] = ['apple', 'deezer'];
+
+/** A cross-reference lookup slower than this counts as failed (search link); D1 is normally far faster. */
+export const XREF_LOOKUP_TIMEOUT_MS = 1000;
 
 const SEARCH_URL: Record<Service, (q: SearchQuery) => string> = {
   spotify: spotifySearchUrl,
@@ -97,11 +113,22 @@ export async function getSourceItem(ctx: UpstreamCtx, ref: SourceRef): Promise<I
   }
 }
 
-export async function resolveRef(ctx: UpstreamCtx, ref: SourceRef, now: () => number = Date.now): Promise<ResolveResult> {
+/** `options` may also be the clock alone (the former third parameter). */
+export async function resolveRef(
+  ctx: UpstreamCtx,
+  ref: SourceRef,
+  options: ResolveOptions | (() => number) = {},
+): Promise<ResolveResult> {
+  const { now = Date.now, xref } = typeof options === 'function' ? { now: options } : options;
   const started = now();
   const source = await getSourceItem(ctx, ref);
   const sourceService = SERVICE_BY_PLATFORM[ref.platform];
   const query = buildQuery(source);
+
+  // Spotify by cross-reference: the source's own identifier right away, the matches' once they finish.
+  const xrefT0 = now();
+  const spotifyXref = xref && sourceService !== 'spotify' ? xrefLookups(xref, source.kind) : undefined;
+  spotifyXref?.ask([identifierOf(source)]);
 
   const timed = async (fn: () => Promise<ServiceDetail>): Promise<ServiceDetail> => {
     const t0 = now();
@@ -124,6 +151,8 @@ export async function resolveRef(ctx: UpstreamCtx, ref: SourceRef, now: () => nu
     if (detail.outcome === 'error' || !detail.item) return undefined;
     return detail.item.kind === 'track' ? detail.item.isrc : detail.item.upc;
   });
+  // Usually Deezer finishes first (Apple often waits for its identifier): look its identifier up meanwhile.
+  void deezerP.then(({ detail }) => spotifyXref?.ask([matchedIdentifier(detail, source.kind)]));
 
   const appleP: Promise<ServiceDetail> =
     sourceService === 'apple'
@@ -139,11 +168,19 @@ export async function resolveRef(ctx: UpstreamCtx, ref: SourceRef, now: () => nu
 
   const [deezer, apple] = await Promise.all([deezerP.then((r) => r.detail), appleP]);
 
+  let spotify: ServiceDetail | undefined;
+  if (spotifyXref) {
+    // At most one more round trip: identifiers only the Apple match carries.
+    spotifyXref.ask([matchedIdentifier(deezer, source.kind), matchedIdentifier(apple, source.kind)]);
+    spotify = { ...spotifyByXref(source, query, await spotifyXref.results()), ms: now() - xrefT0 };
+  }
+
   const details = {} as Record<Service, ServiceDetail>;
   for (const service of SERVICES) {
     if (service === sourceService) details[service] = sourceDetail(source);
     else if (service === 'deezer') details[service] = deezer;
     else if (service === 'apple') details[service] = apple;
+    else if (service === 'spotify' && spotify) details[service] = spotify;
     else details[service] = searchDetail(service, query);
   }
 
@@ -249,6 +286,111 @@ async function matchAppleAlbum(
     const pick = pickBestAlbum(source, results);
     if (!pick.accepted) return noMatch('apple', source, pick.ranked);
     return matched('fuzzy', 'search', pick.accepted.item, pick.accepted.score);
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Spotify (cross-reference)
+
+interface XrefLookups {
+  /** Look up the identifiers not asked for yet (one call for all of them). */
+  ask(raw: ReadonlyArray<string | undefined>): void;
+  /** Every hit so far, and the first lookup error. */
+  results(): Promise<{ hits: XrefHit[]; error?: string }>;
+}
+
+function xrefLookups(xref: XrefReader, kind: Kind): XrefLookups {
+  const asked = new Set<string>();
+  const pending: Array<Promise<Settled<XrefHit[]>>> = [];
+  return {
+    ask(raw) {
+      const ids = normalizeIdentifiers(kind, raw).filter((id) => !asked.has(id));
+      if (!ids.length) return;
+      for (const id of ids) asked.add(id);
+      let lookup: Promise<XrefHit[]>;
+      try {
+        lookup = xref.lookup(kind, ids);
+      } catch (err) {
+        lookup = Promise.reject(err);
+      }
+      pending.push(settle(withTimeout(lookup, XREF_LOOKUP_TIMEOUT_MS)));
+    },
+    async results() {
+      const settled = await Promise.all(pending);
+      const failed = settled.find((s) => !s.ok);
+      return {
+        hits: settled.flatMap((s) => (s.ok ? s.value : [])),
+        error: failed && !failed.ok ? (failed.error instanceof Error ? failed.error.message : String(failed.error)) : undefined,
+      };
+    },
+  };
+}
+
+/**
+ * The learned Spotify items, chosen like search hits (pickBest*, threshold, every hard reject). Never
+ * 'exact': the identifier -> Spotify link was itself learned from a fuzzy match.
+ */
+function spotifyByXref(source: ItemMeta, query: SearchQuery, found: { hits: XrefHit[]; error?: string }): ServiceDetail {
+  const byId = new Map<string, XrefHit>();
+  for (const hit of found.hits) if (hit.item.kind === source.kind && !byId.has(hit.item.id)) byId.set(hit.item.id, hit);
+  const hits = [...byId.values()];
+  const note = found.error ? `xref lookup failed: ${found.error}` : undefined;
+  if (!hits.length) return withNote(searchDetail('spotify', query), note);
+  const pick =
+    source.kind === 'track'
+      ? pickBestTrack(source, hits.map((h) => h.item).filter(isTrack))
+      : pickBestAlbum(source, hits.map((h) => h.item).filter(isAlbum));
+  if (!pick.accepted) return withNote(noMatch('spotify', source, pick.ranked), note);
+  const item = pick.accepted.item;
+  return { ...matched('fuzzy', 'xref', item, pick.accepted.score), identifier: byId.get(item.id)?.identifier };
+}
+
+/**
+ * Normalized ISRCs (tracks) or UPCs (albums) of a result for the Spotify cross-reference: the source's
+ * own, those of the exact/fuzzy Deezer and Apple matches, and the entry's. For a Spotify source (the
+ * identifiers it is learned under), none carried by a match of the other edition (explicit vs clean):
+ * that identifier names another recording, and a later source of that edition would get this one.
+ */
+export function xrefIdentifiers(r: Pick<ResolveResult, 'source' | 'entry' | 'details'>): string[] {
+  const kind = r.source.kind;
+  const ids = normalizeIdentifiers(kind, [
+    identifierOf(r.source),
+    ...MATCHED_SERVICES.map((s) => matchedIdentifier(r.details[s], kind)),
+    kind === 'track' ? r.entry.isrc : r.entry.upc,
+  ]);
+  if (r.details.spotify.via !== 'source') return ids;
+  const otherEdition = normalizeIdentifiers(
+    kind,
+    MATCHED_SERVICES.flatMap((s) => {
+      const d = r.details[s];
+      const id = matchedIdentifier(d, kind);
+      return id !== undefined && explicitDiffers(r.source, d.item) ? [id, d.identifier] : [];
+    }),
+  );
+  return ids.filter((id) => !otherEdition.includes(id));
+}
+
+function explicitDiffers(a: ItemMeta, b: ItemMeta | undefined): boolean {
+  return a.explicit !== undefined && b?.explicit !== undefined && a.explicit !== b.explicit;
+}
+
+function identifierOf(item: ItemMeta): string | undefined {
+  return item.kind === 'track' ? item.isrc : item.upc;
+}
+
+/** The ISRC/UPC of an exact or fuzzy match (Deezer items carry it; Apple items in MusicKit mode). */
+function matchedIdentifier(d: ServiceDetail, kind: Kind): string | undefined {
+  if ((d.outcome !== 'exact' && d.outcome !== 'fuzzy') || !d.item || d.item.kind !== kind) return undefined;
+  return identifierOf(d.item);
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout after ${ms} ms`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer !== null) clearTimeout(timer);
   });
 }
 
@@ -433,6 +575,7 @@ function buildEntry(
     artist: source.artist,
     album: source.kind === 'track' ? source.album : undefined,
     durationMs: source.kind === 'track' ? source.durationMs : undefined,
+    trackCount: source.kind === 'album' ? source.trackCount : undefined,
     releaseYear: Number.isFinite(year) ? year : undefined,
     isrc: source.kind === 'track' ? identifier('isrc') : undefined,
     upc: source.kind === 'album' ? identifier('upc') : undefined,

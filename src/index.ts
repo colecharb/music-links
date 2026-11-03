@@ -3,11 +3,12 @@ import { getCookie, setCookie } from 'hono/cookie';
 import { UpstreamError, UPSTREAM_TIMEOUT_MS, type FetchFn, type UpstreamCtx } from './http';
 import { cacheKey, canonicalPath, extractUrlFromPath, parseInput, refFromParams } from './parse';
 import { renderErrorPage, renderHomePage, renderSharePage } from './render';
-import { resolveRef, type ResolveResult } from './resolve';
+import { resolveRef, xrefIdentifiers, type ResolveResult } from './resolve';
 import { getAppleAuth } from './sources/apple';
 import { logMisses, readEntry, writeEntry } from './store';
 import type { AppEnv, ResolvedEntry, Service, SourceRef } from './types';
 import { isDirect, SERVICE_NAMES, SERVICES } from './types';
+import { d1Xref, recordXref } from './xref';
 
 export interface AppDeps {
   /** Upstream fetch; tests inject recorded fixtures. */
@@ -63,8 +64,9 @@ export function createApp(deps: AppDeps = {}) {
     const running = inflight.get(key);
     // A resolve whose request was cancelled could hang; never join one that is older than possible.
     if (running && Date.now() - running.at < INFLIGHT_MAX_MS) return running.p;
+    const xref = d1Xref(c.env.DB);
     const p = upstream(c)
-      .then((ctx) => resolveRef(ctx, ref))
+      .then((ctx) => resolveRef(ctx, ref, { xref }))
       .finally(() => {
         if (inflight.get(key)?.p === p) inflight.delete(key);
       });
@@ -73,9 +75,16 @@ export function createApp(deps: AppDeps = {}) {
     background(
       c,
       p.then(
-        (result) => {
+        async (result) => {
           remember(key, result.entry);
-          return Promise.all([writeEntry(c.env.LINKS, key, result.entry), logMisses(c.env.DB, result.misses)]);
+          await Promise.all([writeEntry(c.env.LINKS, key, result.entry), logMisses(c.env.DB, result.misses)]);
+          // After the entry is written: learn Spotify mappings (and back-fill), or wait for one.
+          const identifiers = xrefIdentifiers(result);
+          const xrefResult = { key, source: result.source, entry: result.entry, spotify: result.details.spotify, identifiers };
+          await recordXref(xref, c.env.LINKS, xrefResult, (k, patched) => {
+            // Only the resolution that was patched: never replace a newer one held here.
+            if (memory.get(k)?.entry.resolvedAt === patched.resolvedAt) remember(k, patched);
+          });
         },
         () => undefined, // the requests awaiting p report the failure
       ),

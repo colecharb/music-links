@@ -51,6 +51,7 @@ interface Detail {
   item?: Item;
   score?: number;
   rejected?: { item: Item; score: number; reason?: string };
+  identifier?: string;
   note?: string;
   ms?: number;
 }
@@ -129,7 +130,13 @@ for (const [i, link] of links.entries()) {
     const kind = d.via === 'source' ? 'source' : d.outcome;
     counts[svc]![kind] = (counts[svc]![kind] ?? 0) + 1;
     const shown = d.item ?? d.rejected?.item;
-    const note = [d.rejected && !d.item ? `best rejected: ${describe(d.rejected.item)}` : '', d.note ?? ''].filter(Boolean).join(' — ');
+    const note = [
+      d.via === 'xref' && d.identifier ? `learned from a Spotify link, by ${r.source.kind === 'track' ? 'ISRC' : 'UPC'} ${d.identifier}` : '',
+      d.rejected && !d.item ? `best rejected: ${describe(d.rejected.item)}` : '',
+      d.note ?? '',
+    ]
+      .filter(Boolean)
+      .join(' — ');
     lines.push(
       `| ${NAMES[svc]} | ${kind === 'source' ? 'exact (source)' : d.outcome} | ${d.via} | ${cell(d.item ? describe(d.item) : '')} | ${dur(shown?.durationMs)} | ${d.score != null ? d.score.toFixed(2) : d.rejected ? d.rejected.score.toFixed(2) : ''} | ${cell(note)} |`,
     );

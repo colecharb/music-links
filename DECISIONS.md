@@ -65,7 +65,8 @@ Each entry: the decision, why, and the alternative considered.
     (meta tags give whole seconds), explicit flag, album type and track count, which make matching
     stricter. Only the entity for the requested id is used. *Alternative:* meta tags only (spec
     minimum): coarser duration, no explicit flag, artists as one string.
-15. **Spotify outbound is always a search link** (no Web API, per the brief).
+15. **Spotify outbound has no API** (per the brief; Development Mode was tightened again in Feb 2026), so
+    it is a search link unless a learned mapping applies (#41).
 16. **Deezer advanced search syntax is not used.** Verified live (2026-10-26): `artist:"…" track:"…"`
     returns 0 results even for Deezer's documented examples. Instead two plain queries run in parallel:
     `<artist> <title>` and `<title> <last other credit>` (or `<title>` alone). The second query is what
@@ -180,3 +181,30 @@ Each entry: the decision, why, and the alternative considered.
     attribute, so nothing is ever interpolated into script context. Go links are relative.
 39. **The album line is omitted when it equals the track title** (singles), on the page and in previews.
 40. **`dir="auto"`** on title, artist and album so right-to-left titles keep their order.
+
+## Learned Spotify links
+
+41. **ISRC/UPC → Spotify id mappings are learned from Spotify-sourced links** (D1 `spotify_xref`) instead of
+    calling a Spotify API, scraping its internal web-player API (against its terms, actively blocked) or
+    depending on a third party (song.link's API, sparse MusicBrainz data). Identifiers come from the
+    exact/fuzzy Deezer and Apple matches of the Spotify source; a Deezer/Apple match whose explicit flag
+    disagrees with the Spotify item teaches nothing. UPCs are stored without leading zeros (12/13/14-digit
+    forms), ISRCs uppercase without separators.
+42. **Learned links are `fuzzy` with via `xref`, never `exact`**, and each candidate passes the full fuzzy
+    rules against the new source (same as a search hit). Verification uses the stored metadata snapshot,
+    not a Spotify fetch, so it adds no latency. *Alternative:* fetch the Spotify page each time: fresher,
+    one more ~0.5 s call.
+43. **Up to 5 Spotify items per identifier**, newest first, so the usual tie-breaks (original album over
+    compilation, explicit agreement) can still choose between copies. *Alternative:* latest wins, which
+    let a compilation copy replace the album copy.
+44. **Lookups:** the source's own identifier right away, the Deezer match's as soon as Deezer finishes, and
+    Apple-only identifiers after both; at most one D1 round trip after the matches, with a 1 s timeout.
+    A lookup error is a search link with a diagnostic note. Cache hits make no D1 query.
+45. **Back-fill:** a non-Spotify entry cached with a Spotify search link records waiting rows (pruned after
+    30 days, the longest TTL). Learning a mapping re-checks up to 50 waiting entries against their own
+    metadata and patches the KV entry (and the in-isolate copy) when it passes. A waiting row is consumed
+    only on a confirmed outcome, and only the resolution that waited is patched (its `resolvedAt` must
+    still match), so a concurrent re-resolve isn't overwritten with older data. Waiting inserts also read
+    existing mappings in the same D1 batch, which closes the learn/wait race. A patched entry's TTL
+    restarts. *Alternative:* shorter TTLs for entries with a Spotify search link; simpler, but costs
+    re-resolutions and still leaves gaps.

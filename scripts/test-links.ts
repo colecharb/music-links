@@ -32,6 +32,11 @@ export const TEST_LINKS: TestLink[] = [
   { url: 'https://www.deezer.com/track/4304169612', why: 'recent release (2026-09-25)' },
   { url: 'https://www.deezer.com/track/96996588', why: 'obscure track, "Cheikha" honorific' },
   { url: 'https://www.deezer.com/album/1002561451', why: 'recent album (2026-06-12)' },
+  {
+    // Must come after the Spotify link above: the smoke run learns its mapping in the background.
+    url: 'https://www.deezer.com/track/908604612',
+    why: 'same recording as the Spotify Blinding Lights link: direct Spotify link via the learned xref',
+  },
   // YouTube sources.
   { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', why: 'official video title noise, no duration' },
   { url: 'https://music.youtube.com/watch?v=lYBUbBu4W08', why: 'YouTube Music " - Topic" channel' },

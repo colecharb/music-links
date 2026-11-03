@@ -18,10 +18,14 @@
   in-flight dedupe.
 - **Page:** ~5 KB, OG/Twitter tags verified, light/dark, verified at 320 px in Chromium, no layout shift,
   copy-link button as the only JS.
-- **Tests:** 1,795 passing (`npm test`), typecheck clean. Unit tests for parsing, normalization and scoring;
+- **Tests:** 1,871 passing (`npm test`), typecheck clean. Unit tests for parsing, normalization and scoring;
   replay of all 18 recorded live resolutions; route tests incl. a cache-miss flow writing KV and D1.
 - **Live smoke run** (`npm run smoke`) → MATCH_REPORT.md. `npm run dev` checked under `wrangler dev`;
   full flow checked through `npm run dev:proxied`.
+- **Learned Spotify links** (added 2026-11-03): ISRC/UPC → Spotify id mappings learned from Spotify-sourced
+  links give later Apple/Deezer/YouTube links of the same recording a direct Spotify link, and back-fill
+  entries cached earlier. Reviewed by two independent reviewers; all 5 findings fixed. Live check: the
+  Deezer "Blinding Lights" link gets a direct Spotify link learned from the Spotify one.
 - **Reviews:** an independent five-reviewer pass with adversarial verification confirmed 23 findings (6
   that could produce wrong direct links). All are fixed, and the fixes were themselves verified.
 - README (setup, secrets, deploy, misses-log queries), DECISIONS.md (40+ decisions with reasons).
@@ -39,7 +43,9 @@
 
 ## Known gaps
 
-- Spotify, YouTube Music and Amazon Music outbound links are always searches (no usable public APIs).
+- Spotify outbound links are direct only for recordings already shared from Spotify (learned mappings);
+  YouTube Music and Amazon Music are always searches. Entries cached before learned links existed get a
+  Spotify link only when next resolved.
 - YouTube sources have no duration (oEmbed only; the watch page is behind a bot check), so YouTube-sourced
   matches fall back to search more often, and live/remix videos need a named concert or remixer.
 - Cross-script titles (Japanese vs its romanization, Arabic vs Latin) only match through ISRC/UPC.
@@ -56,14 +62,14 @@
 
 ## Morning summary
 
-**What works.** Every route works locally, and all 1,795 tests and the typecheck pass. On the 18-link live
+**What works.** Every route works locally, and all 1,871 tests and the typecheck pass. On the 18-link live
 test set, every direct link was checked and none were wrong. Apple got a direct link for 15 of 16, Deezer
 for 11 of 13, and the three search fallbacks are cases where the right copy genuinely wasn't findable.
 The brief's Khaled track resolves to the same-album Apple recording (the case song.link misses). Cached
 pages take about 7 ms locally, cold resolves about 1.2 s.
 
 **What doesn't.** Everything ran in the iTunes fallback mode, so ISRC lookups on Apple (the strongest
-path) are untested live. Spotify, YouTube Music and Amazon only ever get search links. YouTube sources are
+path) are untested live. YouTube Music and Amazon only ever get search links, and Spotify only for recordings already shared from Spotify. YouTube sources are
 weaker because oEmbed gives no duration.
 
 **Top 3 next improvements.**
@@ -73,6 +79,7 @@ weaker because oEmbed gives no duration.
 2. **Grow the test set from real traffic.** Deploy, then review the D1 misses log weekly (README has the
    queries): `search` rows show recall gaps, and low-score `fuzzy` rows are where wrong links would hide.
    Turn each confirmed case into a recorded regression in `test/resolve.test.ts`.
-3. **Better outbound links for Spotify/YouTube Music.** A licensed metadata source with Spotify/YouTube
-   ids by ISRC (or an Odesli-style partner API) would turn the three search-only services into direct
-   links. Also give YouTube sources a duration, e.g. via the YouTube Data API with a key.
+3. **Better outbound links for YouTube Music/Amazon, and wider Spotify coverage.** Spotify now learns ids
+   from use (see "Learned Spotify links" in the README); songs never shared from Spotify still get a
+   search link. A licensed ISRC → id source would cover the rest. Also give YouTube sources a duration,
+   e.g. via the YouTube Data API with a key.

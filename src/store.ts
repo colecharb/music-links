@@ -33,14 +33,23 @@ export function ttlFor(entry: ResolvedEntry): number {
 }
 
 export async function readEntry(kv: KVNamespace, key: string): Promise<ResolvedEntry | null> {
+  const r = await readEntryState(kv, key);
+  return typeof r === 'string' ? null : r;
+}
+
+/**
+ * Like readEntry, but tells a key that isn't there ('absent') from a failed read or a value of an unknown
+ * shape ('unreadable'), for callers that must not take a transient failure for a missing entry.
+ */
+export async function readEntryState(kv: KVNamespace, key: string): Promise<ResolvedEntry | 'absent' | 'unreadable'> {
   let text: string | null;
   try {
     text = await kv.get(key, 'text');
   } catch (err) {
     console.error('kv read failed', key, err);
-    return null;
+    return 'unreadable';
   }
-  if (text === null) return null;
+  if (text === null) return 'absent';
   try {
     const value: unknown = JSON.parse(text);
     if (isResolvedEntry(value)) return value;
@@ -48,14 +57,17 @@ export async function readEntry(kv: KVNamespace, key: string): Promise<ResolvedE
     // fall through
   }
   console.error('kv entry has an unknown shape, ignoring', key);
-  return null;
+  return 'unreadable';
 }
 
-export async function writeEntry(kv: KVNamespace, key: string, entry: ResolvedEntry): Promise<void> {
+/** True once written; false (logged) when the put failed. */
+export async function writeEntry(kv: KVNamespace, key: string, entry: ResolvedEntry): Promise<boolean> {
   try {
     await kv.put(key, JSON.stringify(entry), { expirationTtl: ttlFor(entry) });
+    return true;
   } catch (err) {
     console.error('kv write failed', key, err);
+    return false;
   }
 }
 
@@ -91,6 +103,7 @@ export function isResolvedEntry(v: unknown): v is ResolvedEntry {
   if (!optional(v.album, 'string') || !optional(v.isrc, 'string') || !optional(v.upc, 'string')) return false;
   if (!optional(v.art, 'string') || !optional(v.explicit, 'boolean')) return false;
   if (!optional(v.durationMs, 'number') || !optional(v.releaseYear, 'number')) return false;
+  if (!optional(v.trackCount, 'number')) return false;
   const links = v.links;
   if (!isRecord(links)) return false;
   return SERVICES.every((s) => isServiceLink(links[s]));

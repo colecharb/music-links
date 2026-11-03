@@ -27,8 +27,9 @@ edit, ...) and, for albums, track count and year. Anything below the confidence 
    2. metadata search, scored → `fuzzy` only above the threshold;
    3. otherwise a search URL → `search`.
    When the source has no ISRC/UPC (Spotify, YouTube), the best Deezer match supplies one for Apple.
-   Spotify, YouTube Music and Amazon Music are always search links when they aren't the source (no
-   usable public APIs).
+   YouTube Music and Amazon Music are always search links when they aren't the source (no usable public
+   APIs). Spotify gets a direct link once the same recording has been shared from Spotify before: see
+   "Learned Spotify links" below.
 4. **Cache** the result in KV (30 days when Apple and Deezer both matched, 6 hours otherwise so
    late-indexed releases fill in) and **log** every non-exact Apple/Deezer outcome to D1.
 5. **Render** a ~5 KB page: art, title, artist, one button per service, copy-link, full OG/Twitter tags
@@ -43,6 +44,18 @@ edit, ...) and, for albums, track count and year. Anything below the confidence 
 | `GET /:p/:k/:id` | Share page. `p` = `sp` `am` `dz` `yt`, `k` = `t` (track) or `a` (album). Redirects to the visitor's preferred service when its match is direct (cookie `pref`, skip with `?stay`). |
 | `GET /go/:service/:p/:k/:id` | Sets `pref=<service>` (1 year) and redirects to that service's link. Every button goes through here. |
 | `GET /api/resolve/:p/:k/:id` | Fresh resolution as JSON with diagnostics. Only when the `DEBUG_API` var is `1` (used by the smoke script). |
+
+### Learned Spotify links
+
+There's no usable Spotify API, so the service learns Spotify ids from use. When a Spotify link
+resolves, the ISRC (tracks) or UPC (albums) of its Deezer/Apple matches is stored in D1 with the
+Spotify id and a metadata snapshot (`spotify_xref`, up to 5 Spotify copies per identifier). When an
+Apple, Deezer or YouTube link of the same recording resolves later, its identifiers are looked up and
+each candidate must pass the normal fuzzy rules against the source; then Spotify gets a direct link
+(always `fuzzy`, never `exact`, since the mapping itself came from a fuzzy match). Links cached earlier
+with a Spotify search button are remembered (`spotify_xref_waiting`) and patched in place when a
+matching mapping is learned. Coverage grows with use: songs never shared from Spotify keep a search
+button. All of it runs in the background; a D1 failure never changes a page.
 
 ## Local setup
 
@@ -104,7 +117,7 @@ npx wrangler kv namespace create LINKS
 
 # 2. D1 database for the misses log: put the printed database_id into wrangler.toml
 npx wrangler d1 create music_links
-npx wrangler d1 migrations apply music_links --remote
+npx wrangler d1 migrations apply music_links --remote   # misses log + learned Spotify links
 
 # 3. Apple MusicKit secrets (recommended, see above)
 npx wrangler secret put APPLE_TEAM_ID
@@ -159,8 +172,8 @@ npx wrangler d1 execute music_links --remote --command \
   per link for everyone, and Apple links are emitted without a storefront, so a match found in one
   country can open Apple's "not available in your country" page for a visitor elsewhere. Items sold only
   in the storefront of the original Apple link (and not in the visitor's or `us`) can't be read at all.
-- **Spotify outbound links are always searches** (the Web API is not usable for this), as are YouTube
-  Music and Amazon Music.
+- **Spotify outbound links are direct only for recordings someone has already shared from Spotify**
+  (learned mappings, below); otherwise searches. YouTube Music and Amazon Music are always searches.
 - **YouTube sources have no duration** (oEmbed doesn't provide it), so matching from YouTube needs closer
   title agreement and falls back to search more often.
 - **iTunes fallback mode** can't look up by ISRC and is rate-limited; see Apple Music secrets above.

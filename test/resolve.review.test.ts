@@ -7,39 +7,20 @@ import { parseMusicUrl } from '../src/parse';
 import { resolveRef, type ResolveResult } from '../src/resolve';
 import { TTL_COMPLETE_SECONDS, TTL_PARTIAL_SECONDS, ttlFor } from '../src/store';
 import type { SourceRef } from '../src/types';
-import type { HttpFixture } from './helpers/fixtures';
-import { fixtureCtx, fixtureFetch, FIXTURES } from './helpers/fixtures';
-
-const MK = 'https://api.music.apple.com/v1/catalog/us';
-const ITUNES = 'https://itunes.apple.com';
-const DEEZER = 'https://api.deezer.com';
-
-type ItunesResult = Record<string, unknown> & {
-  trackId?: number;
-  collectionId: number;
-  artistId: number;
-  artistName: string;
-  collectionName: string;
-  artworkUrl100: string;
-  releaseDate: string;
-};
-
-function recordedJson(url: string): unknown {
-  const f = FIXTURES.get(new URL(url).toString());
-  if (!f) throw new Error(`missing fixture ${url}`);
-  return JSON.parse(f.response.body);
-}
-
-function itunesRecord(url: string, id: number): ItunesResult {
-  const { results } = recordedJson(url) as { results: ItunesResult[] };
-  const r = results.find((x) => (x.trackId ?? x.collectionId) === id);
-  if (!r) throw new Error(`no iTunes result ${id} in ${url}`);
-  return r;
-}
-
-function fixture(url: string, body: unknown, status = 200): HttpFixture {
-  return { request: { url }, response: { status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } };
-}
+import { fixtureCtx, fixtureFetch } from './helpers/fixtures';
+import {
+  albumFixture,
+  DEEZER,
+  fixture,
+  itunesRecord,
+  ITUNES,
+  MK,
+  mkSong,
+  musicKit,
+  recordedJson,
+  songFixture,
+  type ItunesResult,
+} from './helpers/musickit';
 
 /** Answers every request matching `match` with `status` (an outage), everything else from fixtures. */
 function failing(match: (url: string) => boolean, status = 503, inner: FetchFn = fixtureFetch()): FetchFn {
@@ -66,67 +47,7 @@ const outcome = (r: ResolveResult, s: 'apple' | 'deezer') => `${r.details[s].out
 const describeDetail = (r: ResolveResult, s: 'apple' | 'deezer') => JSON.stringify({ ...r.details[s], item: r.details[s].item?.title });
 
 // ---------------------------------------------------------------------------------------------
-// MusicKit resources, built from recorded iTunes results for the same catalog ids (MusicKit calls
-// need a developer token, so they can't be recorded). ISRC/UPC values are the real ones.
-
-const mkArtwork = (r: ItunesResult) => ({ width: 3000, height: 3000, url: r.artworkUrl100.replace(/\/100x100bb\.jpg$/, '/{w}x{h}bb.jpg') });
-
-const mkArtist = (r: ItunesResult) => ({
-  id: String(r.artistId),
-  type: 'artists',
-  href: `/v1/catalog/us/artists/${r.artistId}`,
-  attributes: { name: r.artistName },
-});
-
-function mkAlbum(r: ItunesResult, upc: string) {
-  const id = String(r.collectionId);
-  return {
-    id,
-    type: 'albums',
-    href: `/v1/catalog/us/albums/${id}`,
-    attributes: {
-      artistName: r.artistName,
-      artwork: mkArtwork(r),
-      isCompilation: false,
-      isSingle: false,
-      name: r.collectionName,
-      playParams: { id, kind: 'album' },
-      releaseDate: r.releaseDate.slice(0, 10),
-      trackCount: r.trackCount,
-      upc,
-    },
-    relationships: { artists: { href: `/v1/catalog/us/albums/${id}/artists`, data: [mkArtist(r)] } },
-  };
-}
-
-function mkSong(r: ItunesResult, isrc: string) {
-  const id = String(r.trackId);
-  const { relationships: _artists, ...album } = mkAlbum(r, '');
-  return {
-    id,
-    type: 'songs',
-    href: `/v1/catalog/us/songs/${id}`,
-    attributes: {
-      albumName: r.collectionName,
-      artistName: r.artistName,
-      artwork: mkArtwork(r),
-      discNumber: r.discNumber,
-      durationInMillis: r.trackTimeMillis,
-      isrc,
-      name: r.trackName,
-      playParams: { id, kind: 'song' },
-      releaseDate: r.releaseDate.slice(0, 10),
-      trackNumber: r.trackNumber,
-    },
-    relationships: {
-      albums: { href: `/v1/catalog/us/songs/${id}/albums`, data: [album] },
-      artists: { href: `/v1/catalog/us/songs/${id}/artists`, data: [mkArtist(r)] },
-    },
-  };
-}
-
-const songFixture = (r: ItunesResult, isrc: string) => fixture(`${MK}/songs/${r.trackId}?include=albums,artists`, { data: [mkSong(r, isrc)] });
-const albumFixture = (r: ItunesResult, upc: string) => fixture(`${MK}/albums/${r.collectionId}?include=artists`, { data: [mkAlbum(r, upc)] });
+// MusicKit sources (test/helpers/musickit.ts). ISRC/UPC values are the real ones.
 
 // Queen, "Bohemian Rhapsody" on A Night At The Opera (Deluxe Edition), 354320 ms.
 const BOHEMIAN = itunesRecord(`${ITUNES}/search?term=Queen+bohemian+rhapsody&country=us&media=music&entity=song&limit=20`, 6781024437);
@@ -139,9 +60,6 @@ const SAHRA = itunesRecord(`${ITUNES}/lookup?id=1444129774&country=us&entity=son
 const SAHRA_UPC = '00731453398924';
 const BEST_OF = itunesRecord(`${ITUNES}/lookup?upc=602567759461&country=us`, 1400380382);
 const BEST_OF_UPC = '0602567759461';
-
-const musicKit = (extra: HttpFixture[], fetch?: FetchFn) =>
-  fixtureCtx({ apple: { token: 'test' }, extra, ...(fetch ? { fetch } : {}) });
 
 const am = (kind: 'track' | 'album', id: number): SourceRef => ({ platform: 'am', kind, id: String(id) });
 const dz = (kind: 'track' | 'album', id: string): SourceRef => ({ platform: 'dz', kind, id });

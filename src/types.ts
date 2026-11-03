@@ -117,6 +117,8 @@ export interface ResolvedEntry {
   /** Album title, tracks only. */
   album?: string;
   durationMs?: number;
+  /** Albums only; lets a later Spotify back-fill (src/xref.ts) check the track count. */
+  trackCount?: number;
   releaseYear?: number;
   isrc?: string;
   upc?: string;
