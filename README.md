@@ -64,7 +64,7 @@ Requirements: Node ≥ 22.18 (scripts use Node's built-in TypeScript support).
 ```sh
 npm ci                      # installs from the lockfile (see DECISIONS.md #1 if you add packages)
 cp .dev.vars.example .dev.vars   # optional: Apple MusicKit secrets, see below
-npm run db:migrate:local    # creates the misses table in the local D1 (.wrangler/state)
+npm run db:migrate:local    # creates the local D1 tables (misses log, learned Spotify links)
 npm run dev                 # wrangler dev on http://localhost:8787
 ```
 
