@@ -1,0 +1,14 @@
+{
+ "request": {
+  "url": "https://link.deezer.com/s/30zzNotARealCode0",
+  "method": "GET"
+ },
+ "response": {
+  "status": 302,
+  "headers": {
+   "content-type": "text/html; charset=utf-8",
+   "location": "https://www.deezer.com/deezer-links-404"
+  },
+  "body": "<a href=\"https://www.deezer.com/deezer-links-404\">Found</a>.\n\n"
+ }
+}

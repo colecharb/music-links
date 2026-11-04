@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/lookup?id=1440893075&country=us&entity=song",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":1,\n \"results\": [\n{\"wrapperType\":\"track\", \"kind\":\"song\", \"artistId\":112018, \"collectionId\":1440892370, \"trackId\":1440893075, \"artistName\":\"Nirvana\", \"collectionName\":\"MTV Unplugged In New York (Live Acoustic)\", \"trackName\":\"Where Did You Sleep Last Night (Live Acoustic)\", \"collectionCensoredName\":\"MTV Unplugged In New York (Live Acoustic)\", \"trackCensoredName\":\"Where Did You Sleep Last Night (Live Acoustic)\", \"artistViewUrl\":\"https://music.apple.com/us/artist/nirvana/112018?uo=4\", \"collectionViewUrl\":\"https://music.apple.com/us/album/where-did-you-sleep-last-night-live-acoustic/1440892370?i=1440893075&uo=4\", \"trackViewUrl\":\"https://music.apple.com/us/album/where-did-you-sleep-last-night-live-acoustic/1440892370?i=1440893075&uo=4\", \n\"previewUrl\":\"https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/34/49/ee/3449eea4-5ba9-32b9-a0ed-789e2af7ca7c/mzaf_11895617767092305084.plus.aac.p.m4a\", \"artworkUrl30\":\"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/46/24/33/462433f9-ee74-2d60-4538-859826a7bed7/00720642472729.rgb.jpg/30x30bb.jpg\", \"artworkUrl60\":\"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/46/24/33/462433f9-ee74-2d60-4538-859826a7bed7/00720642472729.rgb.jpg/60x60bb.jpg\", \"artworkUrl100\":\"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/46/24/33/462433f9-ee74-2d60-4538-859826a7bed7/00720642472729.rgb.jpg/100x100bb.jpg\", \"collectionPrice\":10.99, \"trackPrice\":1.29, \"releaseDate\":\"1994-11-01T08:00:00Z\", \"collectionExplicitness\":\"notExplicit\", \"trackExplicitness\":\"notExplicit\", \"discCount\":1, \"discNumber\":1, \"trackCount\":14, \"trackNumber\":14, \"trackTimeMillis\":306067, \"country\":\"USA\", \"currency\":\"USD\", \"primaryGenreName\":\"Alternative\", \"isStreamable\":true}]\n}\n\n\n"
+ }
+}

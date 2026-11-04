@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/lookup?id=1444130134&country=us&entity=song",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":1,\n \"results\": [\n{\"wrapperType\":\"track\", \"kind\":\"song\", \"artistId\":384924, \"collectionId\":1444129774, \"trackId\":1444130134, \"artistName\":\"Khaled\", \"collectionName\":\"Sahra\", \"trackName\":\"Ouelli el Darek\", \"collectionCensoredName\":\"Sahra\", \"trackCensoredName\":\"Ouelli el Darek\", \"artistViewUrl\":\"https://music.apple.com/us/artist/khaled/384924?uo=4\", \"collectionViewUrl\":\"https://music.apple.com/us/album/ouelli-el-darek/1444129774?i=1444130134&uo=4\", \"trackViewUrl\":\"https://music.apple.com/us/album/ouelli-el-darek/1444129774?i=1444130134&uo=4\", \n\"previewUrl\":\"https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/95/41/b5/9541b588-de77-3da1-c44c-78dacb86d198/mzaf_2802118325521035963.plus.aac.p.m4a\", \"artworkUrl30\":\"https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/ef/0b/15/ef0b1594-461e-f4bf-93d4-e1df560a3972/06UMGIM00831.rgb.jpg/30x30bb.jpg\", \"artworkUrl60\":\"https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/ef/0b/15/ef0b1594-461e-f4bf-93d4-e1df560a3972/06UMGIM00831.rgb.jpg/60x60bb.jpg\", \"artworkUrl100\":\"https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/ef/0b/15/ef0b1594-461e-f4bf-93d4-e1df560a3972/06UMGIM00831.rgb.jpg/100x100bb.jpg\", \"collectionPrice\":5.99, \"trackPrice\":1.29, \"releaseDate\":\"1996-11-08T08:00:00Z\", \"collectionExplicitness\":\"notExplicit\", \"trackExplicitness\":\"notExplicit\", \"discCount\":1, \"discNumber\":1, \"trackCount\":12, \"trackNumber\":5, \"trackTimeMillis\":191093, \"country\":\"USA\", \"currency\":\"USD\", \"primaryGenreName\":\"Worldwide\", \"isStreamable\":true}]\n}\n\n\n"
+ }
+}

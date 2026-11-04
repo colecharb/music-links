@@ -1,0 +1,11 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/search?term=Nirvana+nevermind&country=us&media=music&entity=album&limit=20",
+  "method": "GET"
+ },
+ "response": {
+  "status": 403,
+  "headers": {},
+  "body": ""
+ }
+}

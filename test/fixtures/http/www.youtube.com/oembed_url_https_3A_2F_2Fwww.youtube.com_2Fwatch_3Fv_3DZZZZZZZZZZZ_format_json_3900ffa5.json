@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DZZZZZZZZZZZ&format=json",
+  "method": "GET"
+ },
+ "response": {
+  "status": 400,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "body": "Bad Request"
+ }
+}

@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/lookup?upc=886443927087&country=us",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":1,\n \"results\": [\n{\"wrapperType\":\"collection\", \"collectionType\":\"Album\", \"artistId\":5468295, \"collectionId\":617154241, \"amgArtistId\":168791, \"artistName\":\"Daft Punk\", \"collectionName\":\"Random Access Memories\", \"collectionCensoredName\":\"Random Access Memories\", \"artistViewUrl\":\"https://music.apple.com/us/artist/daft-punk/5468295?uo=4\", \"collectionViewUrl\":\"https://music.apple.com/us/album/random-access-memories/617154241?uo=4\", \"artworkUrl60\":\"https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/e8/43/5f/e8435ffa-b6b9-b171-40ab-4ff3959ab661/886443919266.jpg/60x60bb.jpg\", \"artworkUrl100\":\"https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/e8/43/5f/e8435ffa-b6b9-b171-40ab-4ff3959ab661/886443919266.jpg/100x100bb.jpg\", \"collectionPrice\":11.99, \"collectionExplicitness\":\"notExplicit\", \"trackCount\":14, \"copyright\":\"℗ 2013 Daft Life Limited under exclusive license to Columbia Records, a Division of Sony Music Entertainment\", \"country\":\"USA\", \"currency\":\"USD\", \"releaseDate\":\"2013-05-17T07:00:00Z\", \"primaryGenreName\":\"Pop\"}]\n}\n\n\n"
+ }
+}

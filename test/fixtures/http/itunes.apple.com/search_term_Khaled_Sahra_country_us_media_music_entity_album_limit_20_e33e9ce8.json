@@ -1,0 +1,13 @@
+{
+ "request": {
+  "url": "https://itunes.apple.com/search?term=Khaled+Sahra&country=us&media=music&entity=album&limit=20",
+  "method": "GET"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "content-type": "text/javascript; charset=utf-8"
+  },
+  "body": "\n\n\n{\n \"resultCount\":1,\n \"results\": [\n{\"wrapperType\":\"collection\", \"collectionType\":\"Album\", \"artistId\":384924, \"collectionId\":1444129774, \"amgArtistId\":2032685, \"artistName\":\"Khaled\", \"collectionName\":\"Sahra\", \"collectionCensoredName\":\"Sahra\", \"artistViewUrl\":\"https://music.apple.com/us/artist/khaled/384924?uo=4\", \"collectionViewUrl\":\"https://music.apple.com/us/album/sahra/1444129774?uo=4\", \"artworkUrl60\":\"https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/ef/0b/15/ef0b1594-461e-f4bf-93d4-e1df560a3972/06UMGIM00831.rgb.jpg/60x60bb.jpg\", \"artworkUrl100\":\"https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/ef/0b/15/ef0b1594-461e-f4bf-93d4-e1df560a3972/06UMGIM00831.rgb.jpg/100x100bb.jpg\", \"collectionPrice\":5.99, \"collectionExplicitness\":\"notExplicit\", \"trackCount\":12, \"copyright\":\"An Island Records Release; ℗ 1997 UMG Recordings, Inc.\", \"country\":\"USA\", \"currency\":\"USD\", \"releaseDate\":\"1996-11-08T08:00:00Z\", \"primaryGenreName\":\"Worldwide\"}]\n}\n\n\n"
+ }
+}
